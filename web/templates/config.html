@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h2>Config</h2>
+  <p class="phase-note">Read-only in Phase 1. Save/load from UI lands in Phase 2.</p>
+  <pre id="config-dump">loading...</pre>
+</section>
+{% endblock %}
+{% block scripts %}
+<script type="module" src="/static/js/panels/config.js"></script>
+{% endblock %}

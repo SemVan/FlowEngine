@@ -1,0 +1,25 @@
+<svg id="fluidics" viewBox="0 0 600 220" xmlns="http://www.w3.org/2000/svg" aria-label="fluidics tract">
+  <!-- Phase 1 stub. Phase 2 binds real valve/pump state to these elements. -->
+  <rect x="20" y="80" width="80" height="60" rx="6" class="component pump syringe" data-component="sample_syringe"/>
+  <text x="60" y="115" text-anchor="middle">Sample</text>
+
+  <rect x="20" y="20" width="80" height="60" rx="6" class="component pump syringe" data-component="sheath_syringe"/>
+  <text x="60" y="55" text-anchor="middle">Sheath</text>
+
+  <rect x="20" y="150" width="80" height="60" rx="6" class="component pump peristaltic" data-component="wash_pump"/>
+  <text x="60" y="185" text-anchor="middle">Wash</text>
+
+  <circle cx="240" cy="60" r="22" class="component valve" data-component="valve_a"/>
+  <text x="240" y="64" text-anchor="middle">V1</text>
+  <circle cx="240" cy="160" r="22" class="component valve" data-component="valve_b"/>
+  <text x="240" y="164" text-anchor="middle">V2</text>
+
+  <rect x="380" y="60" width="160" height="100" rx="8" class="component cuvette"/>
+  <text x="460" y="115" text-anchor="middle">Cuvette</text>
+
+  <path d="M100 50 L218 60" class="link"/>
+  <path d="M100 110 L218 60" class="link"/>
+  <path d="M100 180 L218 160" class="link"/>
+  <path d="M262 60 L380 90" class="link"/>
+  <path d="M262 160 L380 130" class="link"/>
+</svg>

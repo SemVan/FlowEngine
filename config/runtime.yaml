@@ -1,0 +1,28 @@
+# Runtime parameters — feedrate caps, timeouts, firmware expectations.
+
+firmware:
+  flavor: marlin
+  features_required:
+    - CHECKSUM        # we send N<n> ... *<cs>; firmware must accept it
+    # Add M114_DETAIL if your build reports it. Don't include features your
+    # firmware doesn't advertise — the connect probe will refuse to start.
+
+transport:
+  port: /dev/ttyACM0
+  baud: 250000
+  reconnect_attempts: 5
+  reconnect_backoff_s: 1.0
+
+timeouts:
+  ok_default: 5.0
+  move: 30.0
+  homing: 60.0
+  diagnostics: 3.0
+
+motion:
+  feedrate_cap: 3000.0
+  jog_step_default: 1.0
+
+pressure:
+  source: manual            # Phase 1 default — see docs/HARDWARE.md to switch
+  units: kPa

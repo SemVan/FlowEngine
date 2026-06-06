@@ -1,0 +1,17 @@
+name: prime_sheath
+description: "Prime the sheath line via sheath syringe."
+version: 1
+steps:
+  - op: home
+    axes: [E1]
+  - op: set_valve
+    name: sheath_valve
+    position: A
+  - op: move
+    axis: E1
+    by: 40.0
+    feedrate: 400.0
+  - op: dwell
+    seconds: 2
+  - op: log
+    message: "sheath line primed"

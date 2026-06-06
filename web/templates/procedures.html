@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h2>Procedures</h2>
+  <p class="phase-note">Listing &amp; lint are Phase 1. Running them is Phase 2.</p>
+  <button id="reload-procs" type="button">Reload</button>
+  <ul id="proc-list"></ul>
+  <pre id="proc-detail"></pre>
+</section>
+{% endblock %}
+{% block scripts %}
+<script type="module" src="/static/js/panels/procedures.js"></script>
+{% endblock %}

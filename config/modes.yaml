@@ -1,0 +1,27 @@
+# Three operating modes. Phase 2 wires switching; Phase 1 just exposes the list.
+# Edit freely — the UI renders one button per mode here, in this order.
+
+default: idle
+
+modes:
+  - name: idle
+    label: "Idle"
+    description: "Pumps off, valves at A, autosampler at safe_z. The baseline state."
+    color: "#bbb"
+    procedures: [home_all, shutdown]
+
+  - name: run
+    label: "Run"
+    description: "Sample + sheath flow at run-mode rates. Use after priming."
+    color: "#1e6"
+    runtime_overrides:
+      "motion.feedrate_cap": 1500.0
+    procedures: [prime_sample, prime_sheath]
+
+  - name: wash
+    label: "Wash"
+    description: "Peristaltic-driven wash + dwell. Lower flow rates for cleaning."
+    color: "#5af"
+    runtime_overrides:
+      "motion.feedrate_cap": 800.0
+    procedures: [wash]

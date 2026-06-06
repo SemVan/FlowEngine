@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel jog-panel" data-panel="jog">
+  <h2>Jog</h2>
+  <table class="jog-table">
+    <thead>
+      <tr>
+        <th>Axis</th><th>Name</th><th>Position</th><th>−</th><th>step</th><th>+</th><th>feedrate</th><th>home</th>
+      </tr>
+    </thead>
+    <tbody id="jog-tbody">
+      {% for ax in device_map.axes %}
+      <tr data-axis="{{ ax.marlin_axis }}">
+        <td class="ax-letter">{{ ax.marlin_axis }}</td>
+        <td>{{ ax.name }}<br><small>{{ ax.kind }}</small></td>
+        <td class="ax-pos" data-axis-pos="{{ ax.marlin_axis }}">—</td>
+        <td><button type="button" data-jog="{{ ax.marlin_axis }}" data-dir="-1">−</button></td>
+        <td><input type="number" step="0.1" min="0.01" value="1.0" data-step="{{ ax.marlin_axis }}" /> {{ ax.units }}</td>
+        <td><button type="button" data-jog="{{ ax.marlin_axis }}" data-dir="+1">+</button></td>
+        <td><input type="number" step="10" min="1" value="{{ ax.feedrate_default }}" data-feedrate="{{ ax.marlin_axis }}" /></td>
+        <td><button type="button" data-home="{{ ax.marlin_axis }}">home</button></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="jog-actions">
+    <button type="button" id="home-all">Home all</button>
+    <button type="button" id="read-endstops">Read endstops</button>
+    <button type="button" id="read-firmware">Read firmware</button>
+  </div>
+</section>
+
+<section class="panel mode-panel" data-panel="modes">
+  <h2>Modes <span class="phase-tag">Phase 2</span></h2>
+  <div id="mode-buttons">
+    <button type="button" disabled>Mode A</button>
+    <button type="button" disabled>Mode B</button>
+    <button type="button" disabled>Mode C</button>
+  </div>
+</section>
+
+<section class="panel fluidics-panel" data-panel="fluidics">
+  <h2>Fluidics <span class="phase-tag">Phase 2</span></h2>
+  {% include "partials/fluidics_svg.html" %}
+</section>
+{% endblock %}

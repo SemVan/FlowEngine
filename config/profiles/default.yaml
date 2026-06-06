@@ -1,0 +1,6 @@
+# Profile — picks which device map / runtime / modes set is active.
+# Phase 1 only uses `name` cosmetically; we always load device_map.yaml,
+# runtime.yaml, modes.yaml from the active config directory.
+
+name: default
+description: "Default profile — refers to the top-level config/*.yaml files."

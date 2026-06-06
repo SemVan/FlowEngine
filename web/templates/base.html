@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ title or "FlowEngine" }}</title>
+  <link rel="icon" href="/static/img/favicon.png" />
+  <link rel="stylesheet" href="/static/css/base.css" />
+  <link rel="stylesheet" href="/static/css/panels.css" />
+  <link rel="stylesheet" href="/static/css/fluidics.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>FlowEngine</h1>
+    <nav>
+      <a href="/">Control</a>
+      <a href="/procedures">Procedures</a>
+      <a href="/config">Config</a>
+      <a href="/stepskip">Step-skip</a>
+    </nav>
+    <div class="status">
+      <span id="connection-dot" class="dot dot-unknown" title="connection"></span>
+      <span id="state-label">unknown</span>
+    </div>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="logbar">
+    <button id="abort-btn" type="button">ABORT (M410)</button>
+    <ul id="log-tail"></ul>
+  </footer>
+  <script type="module" src="/static/js/main.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,17 @@
+name: prime_sample
+description: "Prime the sample line: valve A → push syringe → settle."
+version: 1
+steps:
+  - op: home
+    axes: [E0]
+  - op: set_valve
+    name: sample_valve
+    position: A
+  - op: move
+    axis: E0
+    by: 30.0
+    feedrate: 300.0
+  - op: dwell
+    seconds: 2
+  - op: log
+    message: "sample line primed (30 mm syringe)"

@@ -1,0 +1,9 @@
+#fluidics { width: 100%; max-width: 700px; height: auto; }
+#fluidics .component { fill: #f4f4f4; stroke: #888; stroke-width: 1.5; }
+#fluidics .component.pump.active { fill: #fff4d2; stroke: var(--warn); }
+#fluidics .component.valve.pos-A { fill: #e0f4ff; }
+#fluidics .component.valve.pos-B { fill: #fff0e8; }
+#fluidics .component.cuvette { fill: #f8fff8; stroke: var(--accent); }
+#fluidics text { font: 12px var(--mono); fill: #333; pointer-events: none; }
+#fluidics .link { stroke: #999; stroke-width: 2; fill: none; }
+#fluidics .link.active { stroke: var(--accent); stroke-width: 3; }

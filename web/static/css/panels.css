@@ -1,0 +1,19 @@
+/* Jog panel ---------------------------------------------------------- */
+.jog-table { width: 100%; border-collapse: collapse; }
+.jog-table th, .jog-table td {
+  padding: .35rem .4rem; border-bottom: 1px solid #eee; text-align: left;
+  font-size: 13px;
+}
+.jog-table th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+.jog-table .ax-letter { font-family: var(--mono); font-weight: 700; }
+.jog-table .ax-pos { font-family: var(--mono); }
+.jog-table input { width: 5.5rem; }
+.jog-table button { padding: .15rem .55rem; border: 1px solid var(--border); border-radius: 3px; background: #fafafa; }
+.jog-table button:hover:not(:disabled) { background: #eef; }
+
+.jog-actions { margin-top: .75rem; display: flex; gap: .5rem; }
+.jog-actions button { padding: .35rem .8rem; border: 1px solid var(--border); border-radius: 4px; background: #fafafa; }
+
+/* Mode panel --------------------------------------------------------- */
+#mode-buttons { display: flex; gap: .5rem; }
+#mode-buttons button { padding: .8rem 1.5rem; border: 1px solid var(--border); border-radius: 6px; background: #fff; font-weight: 600; }
