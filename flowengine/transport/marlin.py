@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from contextlib import suppress
 from typing import Literal
 
@@ -57,6 +58,24 @@ class MarlinTransport(Transport):
         self._line_no = 1
         self._last_sent.clear()
         self._read_task = asyncio.create_task(self._read_loop(), name="marlin-read")
+        # Opening the port toggles DTR, which resets the board. Wait for Marlin's
+        # 'start' banner before sending anything, otherwise the first command
+        # lands while the bootloader is still running and we lose sync.
+        deadline = time.monotonic() + 10.0
+        saw_start = False
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                line = await asyncio.wait_for(self._inbox.get(), timeout=remaining)
+            except asyncio.TimeoutError:
+                break
+            if line.strip().lower() == "start":
+                saw_start = True
+                break
+        if not saw_start:
+            log.warning("did not see Marlin 'start' banner within 10s, proceeding anyway")
         # Reset Marlin's line-number counter to ours.
         await self.send_line("M110 N0", _bypass_lineno=True)
         log.info("marlin transport opened on %s @ %d", self._port, self._baud)
