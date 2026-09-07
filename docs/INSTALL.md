@@ -9,14 +9,14 @@
 ## 1. Get the code and create a virtualenv
 
 ```bash
-git clone <this-repo> FlowEngine
+git clone https://github.com/SemVan/FlowEngine.git
 cd FlowEngine
 
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 
-pip install --upgrade pip
-pip install -e ".[dev]"
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
 ```
 
 `-e` installs in editable mode so your source edits take effect immediately. `[dev]` pulls test/lint tooling.
@@ -28,7 +28,14 @@ pytest                              # all tests should pass
 ./scripts/run_mock.sh               # http://127.0.0.1:8765/
 ```
 
-If pytest is green and the browser shows a working jog panel without any USB device plugged in, you're good.
+If the tests pass and the browser reports `connected_idle`, the software stack is working.
+
+On Windows, where the shell scripts are not directly available, use:
+
+```powershell
+.venv\Scripts\activate
+python -m flowengine --mock
+```
 
 ## 3. USB / serial permissions for real hardware
 
@@ -47,28 +54,54 @@ Check: `groups` should list `dialout`. Then:
 ls -l /dev/ttyACM*
 ```
 
-You should see the device. If not, run `dmesg | tail` after plugging in to find the actual device name and edit `config/runtime.yaml` (`transport.port`).
+You should see the device. FlowEngine normally discovers it automatically. If
+several compatible serial devices are connected, set `FLOWENGINE_SERIAL_PORT`
+to the required path before starting the app.
 
 If `ModemManager` is grabbing the port (you see it flicker open/close), block it for your VID/PID via udev rules — see Marlin/3D-printer wikis.
 
 ### macOS
 
-Devices appear as `/dev/tty.usbmodem*`. Set `FLOWENGINE_SERIAL_PORT=/dev/tty.usbmodemXYZ` in your `.env` (copy from `.env.example`). The first time you plug the board in, macOS may prompt to allow it under System Settings → Privacy & Security.
+Devices normally appear as `/dev/cu.usbmodem*` and are discovered automatically.
+If necessary, run with an explicit path:
+
+```bash
+FLOWENGINE_SERIAL_PORT=/dev/cu.usbmodemXXXX ./scripts/run.sh
+```
+
+Some Monster8 revisions do not negotiate power correctly with a direct USB-C to
+USB-C cable. A USB-A data cable through a USB-C adapter is a known working option.
 
 For FTDI-based boards: the official driver and Apple's built-in CDC can conflict — uninstall the official driver and rely on Apple's.
 
 ### Windows
 
-Marlin typically appears as `COMn`. Find the COM number in Device Manager → Ports. Set `FLOWENGINE_SERIAL_PORT=COM3` (or whichever).
+Marlin typically appears as `COMn` and should be discovered automatically. If
+needed, find the number in Device Manager → Ports and run:
+
+```powershell
+$env:FLOWENGINE_SERIAL_PORT="COM3"
+python -m flowengine
+```
 
 ## 4. Run
 
 ```bash
-cp .env.example .env                # then edit FLOWENGINE_SERIAL_PORT
 ./scripts/run.sh
 ```
 
-Open `http://127.0.0.1:8765/`. The status badge will show `connected_idle` if everything is wired correctly. Read `docs/HARDWARE.md` next — do not jog anything blindly.
+Open `http://127.0.0.1:8765/`. A successful first connection shows
+`connected_idle` and `diagnostics only`. Check the following buttons:
+
+- **Read firmware** — Marlin identity and capabilities;
+- **Read position** — logical axes and coordinates;
+- **Read endstops** — current switch states;
+- **Read settings** — steps, speed limits, currents, and other EEPROM settings;
+- **Read drivers** — communication status of the stepper drivers.
+
+Jog and Home must remain disabled while `motion.enabled` is `false`. Do not
+enable motion until motors, drivers, power, directions, travel, and endstops have
+been verified physically.
 
 ## 5. User overlays (optional)
 
@@ -82,22 +115,17 @@ cp config/device_map.yaml ~/.config/flowengine/device_map.yaml
 
 Audit log is written to `~/.local/state/flowengine/audit.jsonl`. Keep it; it's invaluable when something went wrong on the bench last week.
 
-## 6. uPlot (Phase 3 — streaming pressure chart)
-
-uPlot is vendored in `web/static/js/vendor/`. The Phase 3 pressure plot won't render until it's there. To install:
-
-```bash
-curl -L -o web/static/js/vendor/uplot.iife.min.js \
-  https://unpkg.com/uplot@1.6.30/dist/uPlot.iife.min.js
-curl -L -o web/static/js/vendor/uplot.min.css \
-  https://unpkg.com/uplot@1.6.30/dist/uPlot.min.css
-```
-
-(These files are gitignored to keep the repo source-only.)
-
 ## Troubleshooting
 
 - **`PermissionError: /dev/ttyACM0`** — you're not in `dialout`. Re-read step 3.
+- **`Marlin USB serial port not found`** — check the cable, adapter, board power,
+  and whether the device appears in the operating system.
+- **`multiple Marlin serial ports found`** — select one with
+  `FLOWENGINE_SERIAL_PORT`.
 - **`Could not open serial port`** — another process owns it. On Linux, that's often ModemManager; on macOS, an old `pronterface`/`octoprint` session.
 - **Browser shows "disconnected"** — server didn't start, or WebSocket can't reach it. Check `./scripts/run_mock.sh` output for tracebacks.
-- **`firmware features missing: CHECKSUM`** — your Marlin build was compiled without `EMERGENCY_PARSER` / `LIN_ADVANCE` toggles; the relevant flag is `CHECKSUM`. Recompile Marlin with `Configuration_adv.h` defaults or remove the requirement from `runtime.yaml` (not recommended).
+- **`All LOW` in Read drivers** — driver communication is not available. Common
+  causes are absent drivers, missing motor power, or a mismatched UART/SPI configuration.
+
+The tested firmware reports `EMERGENCY_PARSER:0`. Do not rely on the UI's
+`M410` button as a guaranteed immediate physical stop; provide a hardware power cutoff.

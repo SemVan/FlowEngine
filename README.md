@@ -24,11 +24,13 @@ Control software for a flow cytometer's fluidics tract.
 ## Quickstart (mock mode, no hardware)
 
 ```bash
-git clone <this-repo> && cd FlowEngine
+git clone https://github.com/SemVan/FlowEngine.git
+cd FlowEngine
 
 # Recommended: a virtualenv
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
 
 # Run the test suite (mock-driven)
 pytest
@@ -38,16 +40,33 @@ pytest
 # → open http://127.0.0.1:8765/
 ```
 
-Without real hardware you get the full UI: jog any axis, watch positions update over WebSocket, hit Abort, simulate disconnect.
+Without real hardware you can exercise the UI, motion API, procedures, state
+updates, diagnostics, and soft limits against a simulated Marlin controller.
 
 ## Quickstart (real hardware)
 
-1. Flash Marlin onto your Monster8 MK2 (see `docs/HARDWARE.md`).
-2. Edit `config/device_map.yaml` — set `steps_per_unit`, `travel`, `home_direction` for each axis. Every placeholder there is marked `TODO(hardware)`.
-3. Edit `config/runtime.yaml` if your serial port isn't `/dev/ttyACM0`.
-4. `./scripts/run.sh` and open `http://127.0.0.1:8765/`.
+1. Connect the Marlin-flashed Monster8 over USB. For USB-C hosts, a USB-A data
+   cable plus a USB-C adapter may be required by boards without correct USB-C CC wiring.
+2. Leave `motion.enabled: false` and `motion.configure_firmware: false` in
+   `config/runtime.yaml` for the first connection.
+3. Run `./scripts/run.sh` and open `http://127.0.0.1:8765/`.
+4. Use **Read firmware**, **Read position**, **Read endstops**, **Read settings**,
+   and **Read drivers** in the web UI.
 
-If you've never wired this instrument before, follow the bring-up checklist in `docs/HARDWARE.md`. **Do not skip the endstop polarity test.**
+FlowEngine auto-detects the Marlin USB CDC port (including the STM32
+`0483:5740` device used during bring-up). Override it only when auto-detection
+is ambiguous:
+
+```bash
+FLOWENGINE_SERIAL_PORT=/dev/cu.usbmodemXXXX ./scripts/run.sh  # macOS
+FLOWENGINE_SERIAL_PORT=/dev/ttyACM0 ./scripts/run.sh          # Linux
+```
+
+The shipped map reflects the prototype configuration recovered from
+`cytonator3000`: `X` and `Y` are syringe pumps, `A/B/C` are valves, and `U` is
+the wash pump. This mapping and all calibration values still require physical
+verification. Do not enable motion before checking drivers, wiring, directions,
+limits, and endstop polarity.
 
 ## Documentation
 
@@ -61,18 +80,27 @@ If you've never wired this instrument before, follow the bring-up checklist in `
 | `docs/ROADMAP.md` | Phases 1 / 2 / 3 and what each adds |
 | `docs/STEPSKIP.md` | Phase 3 step-skipping test design |
 
-## What's in this release (Phase 1)
+## Current status
 
-- Serial transport with Marlin's checksum + resend protocol from day one.
+- Marlin serial transport with optional checksum/line-number framing.
+- Automatic Marlin USB-port discovery on macOS, Linux, and Windows.
 - Mock transport with the same `ok` / error / disconnect semantics for CI.
-- Command queue with per-class timeouts and `M410` abort.
+- Single-writer command queue with response parsing and timeouts.
 - Controller state machine.
-- Soft limits enforced in software (mandatory because endstops are wired-OR).
+- Motion interlock plus homing and software travel limits.
 - REST endpoints for jog / move / home / stop / diagnostics; WebSocket telemetry.
-- Web UI: per-axis jog panel, status badge, log tail, big red Abort button.
-- Default YAML configs for all 8 axes + sample procedures.
+- Read-only `M115`, `M114`, `M119`, `M503`, and `M122` diagnostics in the web UI.
+- YAML procedure execution for homing, moves, valve positions, dwell, and logging.
+- A reconstructed `X/Y/A/B/C/U` device map and matching example procedures.
+- Automated tests covering the parser, queue, limits, state, WebSocket, and mock stack.
 
-Phase 2 (procedures DSL runner, mode switching, live fluidics SVG) and Phase 3 (pressure + step-skip test) are scaffolded — see `docs/ROADMAP.md`.
+Mode switching, live fluidics visualization, pressure feedback, variable loops,
+and multi-controller support are not implemented yet. The Fluidics diagram is a
+draft, not a verified tubing diagram.
+
+> **Safety:** the current real-hardware profile starts in diagnostics-only mode.
+> Also, the tested firmware reports `EMERGENCY_PARSER:0`, so `M410` must not be
+> treated as a guaranteed physical emergency stop. Use a hardware power cutoff.
 
 ## Layout
 
