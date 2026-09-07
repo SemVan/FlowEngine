@@ -22,6 +22,7 @@ async def get_config(ctx: AppContext = Depends(get_ctx)):
 async def get_schemas():
     """JSON schemas for clients that want to render forms generically."""
     from flowengine.schemas import DeviceMap, ModesConfig, RuntimeParams
+
     return {
         "DeviceMap": DeviceMap.model_json_schema(),
         "RuntimeParams": RuntimeParams.model_json_schema(),

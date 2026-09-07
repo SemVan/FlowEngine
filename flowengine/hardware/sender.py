@@ -48,19 +48,22 @@ class GcodeSender:
 
     async def jog(self, axis: str, delta: float, feedrate: float | None = None) -> None:
         p = self._motion.plan_relative(axis, delta, feedrate)
-        # Marlin's E uses absolute/relative independent of XYZ; keep simple by switching
-        # to absolute moves with computed targets.
+        # Never trust the modal state left by another host/session.
+        await self._q.send("G90", timeout=self._timeouts.diagnostics)
         await self._q.send(
             f"G1 {axis}{p.target:.4f} F{p.feedrate:.2f}",
             timeout=self._timeouts.move,
         )
+        self._motion.accept_target(axis, p.target)
 
     async def move_to(self, axis: str, target: float, feedrate: float | None = None) -> None:
         p = self._motion.plan_absolute(axis, target, feedrate)
+        await self._q.send("G90", timeout=self._timeouts.diagnostics)
         await self._q.send(
             f"G1 {axis}{p.target:.4f} F{p.feedrate:.2f}",
             timeout=self._timeouts.move,
         )
+        self._motion.accept_target(axis, p.target)
 
     async def home(self, axes: list[str] | None = None) -> None:
         homed = await self._homing.home(self._q, axes)
@@ -77,6 +80,15 @@ class GcodeSender:
     async def read_endstops(self) -> dict[str, bool]:
         result = await self._q.send("M119", timeout=self._timeouts.diagnostics)
         return result.endstops or {}
+
+    async def read_diagnostic(self, command: str):
+        """Run an allow-listed read-only Marlin diagnostic command."""
+        if command not in {"M114", "M119", "M503", "M122"}:
+            raise ValueError(f"unsafe diagnostic command: {command}")
+        result = await self._q.send(command, timeout=self._timeouts.diagnostics)
+        if result.position:
+            self._motion.update_position(result.position)
+        return result
 
     async def read_firmware(self) -> tuple[str, frozenset[str]]:
         result = await self._q.send("M115", timeout=self._timeouts.diagnostics)

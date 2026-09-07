@@ -31,24 +31,29 @@ from flowengine.api import (
     ws_router,
 )
 from flowengine.api.deps import AppContext
-from flowengine.config import AppSettings, WEB_DIR
-from flowengine.errors import ConfigError
+from flowengine.config import WEB_DIR, AppSettings
+from flowengine.errors import ConfigError, ControllerError
 from flowengine.events import EventBus
 from flowengine.hardware import CommandQueue, GcodeSender, MotionModel
 from flowengine.hardware.homing import EndstopHoming
 from flowengine.loaders import load_device_map, load_modes, load_runtime
 from flowengine.logging_setup import configure_logging
+from flowengine.procedures.runner import ProcedureRunner
 from flowengine.state import State, StateMachine
-from flowengine.transport import MarlinTransport, MockTransport, Transport
+from flowengine.transport import MarlinTransport, MockTransport, Transport, discover_marlin_port
 
 log = logging.getLogger(__name__)
 templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))
 
 
-def _build_transport(settings: AppSettings) -> Transport:
+def _build_transport(settings: AppSettings, runtime) -> Transport:
     if settings.mock:
         return MockTransport(latency_s=0.005)
-    return MarlinTransport(port=settings.serial_port, baud=settings.serial_baud)
+    return MarlinTransport(
+        port=discover_marlin_port(settings.serial_port or runtime.transport.port),
+        baud=settings.serial_baud or runtime.transport.baud,
+        use_line_numbers=runtime.firmware.use_line_numbers,
+    )
 
 
 async def _forward_state_to_ws(state: StateMachine, events: EventBus) -> None:
@@ -80,7 +85,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             log.error("config load failed: %s", e)
             raise
 
-        transport = _build_transport(settings)
+        transport = _build_transport(settings, runtime)
         await transport.open()
 
         queue = CommandQueue(transport, default_timeout_s=runtime.timeouts.ok_default)
@@ -89,11 +94,24 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         sender = GcodeSender(queue, motion, device_map, homing, runtime.timeouts)
         state = StateMachine()
         events = EventBus()
+        runner = ProcedureRunner(sender, device_map, state, events)
 
         try:
-            await sender.configure()
-            await state.transition(State.CONNECTED_IDLE, detail="connected")
-        except Exception as e:  # noqa: BLE001
+            firmware_raw, firmware_caps = await sender.read_firmware()
+            if "marlin" not in firmware_raw.lower():
+                raise ControllerError(f"unexpected firmware response: {firmware_raw!r}")
+            missing = set(runtime.firmware.features_required) - set(firmware_caps)
+            if missing:
+                raise ControllerError("firmware features missing: " + ", ".join(sorted(missing)))
+            if runtime.motion.configure_firmware:
+                await sender.configure()
+            detail = (
+                "connected; motion enabled"
+                if runtime.motion.enabled
+                else "connected; diagnostics only"
+            )
+            await state.transition(State.CONNECTED_IDLE, detail=detail)
+        except Exception as e:
             log.exception("initial configure failed: %s", e)
             await state.transition(State.ERRORED, detail=str(e))
 
@@ -107,6 +125,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             sender=sender,
             state=state,
             events=events,
+            runner=runner,
         )
         forwarder = asyncio.create_task(_forward_state_to_ws(state, events))
 

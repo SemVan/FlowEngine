@@ -46,11 +46,12 @@ class MotionModel:
 
     def update_position(self, positions: dict[str, float]) -> None:
         for k, v in positions.items():
-            # Marlin's M114 reports `E:`, which we map onto E0 for single-extruder fluidics.
-            if k == "E":
-                self._positions["E0"] = v
-            elif k in self._positions:
+            if k in self._positions:
                 self._positions[k] = v
+
+    def accept_target(self, axis: str, target: float) -> None:
+        """Commit a planned position only after the controller accepted the move."""
+        self._positions[axis] = target
 
     def plan_relative(self, axis: str, delta: float, feedrate: float | None) -> AxisPosition:
         cfg = self._map.axis(axis)
@@ -77,6 +78,4 @@ class MotionModel:
         if fr > cap:
             log.warning("feedrate %.1f clamped to cap %.1f on axis %s", fr, cap, axis)
             fr = cap
-        # Update predicted position now; sender flushes M114 to reconcile on idle.
-        self._positions[axis] = target
         return AxisPosition(target=target, feedrate=fr)

@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
-from flowengine.errors import TransportTimeout
+from flowengine.errors import TransportClosed, TransportTimeout
 from flowengine.hardware.queue import CommandQueue
 from flowengine.transport.mock import MockTransport
 
@@ -39,7 +37,7 @@ async def test_timeout(mock_q):
     t, q = mock_q
     # Force the transport to never respond by closing it underneath.
     await t.close()
-    with pytest.raises(TransportTimeout):
+    with pytest.raises(TransportClosed):
         await q.send("M115", timeout=0.1)
 
 
@@ -50,10 +48,10 @@ async def test_resend_round_trip():
     # Switch off mock's framing-strip via a MarlinTransport-style send isn't easy here;
     # instead, exercise the queue with an injected error to ensure the queue handles it.
     t.inject_error(n=1)
-    # The resend is for a Marlin transport; mock's injected error sends `Resend: N`
-    # which the queue tries to forward — but mock isn't a MarlinTransport, so the
-    # queue should raise a protocol error. That's the correct contract.
-    with pytest.raises(Exception):  # ControllerError or TransportProtocolError
+    # Plain MockTransport commands have no line number, so it can report the
+    # line-number error but cannot request a concrete resend. The queue waits
+    # for the follow-up until its bounded timeout rather than accepting it as ok.
+    with pytest.raises(TransportTimeout):
         await q.send("G1 X1 F100")
 
 
@@ -64,6 +62,7 @@ async def test_abort_sends_m410():
     await q.abort()
     # After abort, sending more commands without reset is refused.
     from flowengine.errors import ControllerError
+
     with pytest.raises(ControllerError):
         await q.send("G1 X1 F100")
     q.reset_abort()

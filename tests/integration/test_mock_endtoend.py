@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -90,6 +92,23 @@ def test_procedures_list(client):
     assert isinstance(procs, list)
     # At least one of the shipped sample procedures should parse cleanly.
     assert any(p.get("ok") for p in procs)
+
+
+def test_procedure_runs_end_to_end(client):
+    response = client.post("/api/procedures/home_all/run")
+    assert response.status_code == 200, response.text
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        status = client.get("/api/procedures/status").json()
+        if not status["running"]:
+            break
+        time.sleep(0.01)
+    assert status == {
+        "running": False,
+        "name": "home_all",
+        "step": 2,
+        "error": None,
+    }
 
 
 def test_idempotency_key_dedupes(client):

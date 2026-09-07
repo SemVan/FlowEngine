@@ -1,5 +1,4 @@
-// Procedures listing — Phase 1 supports listing + per-procedure detail (lint).
-// Running them is Phase 2.
+// Procedure browser and runner controls.
 
 import { api } from "../api.js";
 
@@ -16,7 +15,7 @@ async function reload() {
       if (!p.ok) {
         li.innerHTML = `<strong>${p.file}</strong> — <span style="color:var(--error)">${p.error}</span>`;
       } else {
-        li.innerHTML = `<a href="#" data-name="${p.name}">${p.name}</a> — ${p.description || ""} <small>(${p.steps} steps)</small>`;
+        li.innerHTML = `<a href="#" data-name="${p.name}">${p.name}</a> — ${p.description || ""} <small>(${p.steps} steps)</small> <button type="button" data-run="${p.name}">Run</button>`;
       }
       list.appendChild(li);
     }
@@ -35,6 +34,19 @@ list?.addEventListener("click", async (ev) => {
   } catch (e) {
     detail.textContent = "Error: " + e.message;
   }
+});
+
+list?.addEventListener("click", async (ev) => {
+  const button = ev.target.closest("button[data-run]");
+  if (!button) return;
+  button.disabled = true;
+  try { detail.textContent = JSON.stringify(await api.runProcedure(button.dataset.run), null, 2); }
+  catch (e) { detail.textContent = `Run refused: ${e.message}`; }
+  finally { button.disabled = false; }
+});
+
+document.getElementById("abort-proc")?.addEventListener("click", async () => {
+  detail.textContent = JSON.stringify(await api.abortProcedure(), null, 2);
 });
 
 document.getElementById("reload-procs")?.addEventListener("click", reload);

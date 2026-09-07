@@ -1,11 +1,10 @@
 name: shutdown
-description: "Park autosampler at safe Z, return valves to A, retract syringes."
+description: "Return all three valves to their home positions and home syringes."
 version: 1
 steps:
-  - op: move
-    axis: Z
-    to: 0.0          # home_direction=max so 0 is the top (safe)
-    feedrate: 300.0
+  - op: set_valve
+    name: wash_valve
+    position: A
   - op: set_valve
     name: sample_valve
     position: A
@@ -13,6 +12,6 @@ steps:
     name: sheath_valve
     position: A
   - op: home
-    axes: [E0, E1]
+    axes: [X, Y]
   - op: log
     message: "shutdown complete"

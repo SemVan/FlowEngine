@@ -2,7 +2,7 @@
 
 from flowengine.transport.base import Transport, TransportName
 from flowengine.transport.klipper import KlipperTransport
-from flowengine.transport.marlin import MarlinTransport
+from flowengine.transport.marlin import MarlinTransport, discover_marlin_port
 from flowengine.transport.mock import MockTransport
 from flowengine.transport.parser import (
     BusyEcho,
@@ -42,6 +42,7 @@ __all__ = [
     "Transport",
     "TransportName",
     "aggregate_endstops",
+    "discover_marlin_port",
     "frame_with_line_number",
     "make_checksum",
     "parse_line",

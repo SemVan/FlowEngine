@@ -16,7 +16,9 @@ class ModeDefinition(BaseModel):
     label: str = Field(min_length=1, description="Short label for the button.")
     description: str = ""
     runtime_overrides: dict[str, float | int | str | bool] = Field(default_factory=dict)
-    procedures: list[str] = Field(default_factory=list, description="Procedure names visible in this mode.")
+    procedures: list[str] = Field(
+        default_factory=list, description="Procedure names visible in this mode."
+    )
     color: str = Field(default="#888", description="CSS color for the mode button.")
 
 

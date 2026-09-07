@@ -3,13 +3,16 @@ description: "Run peristaltic wash through the tract. Valves to B."
 version: 1
 steps:
   - op: set_valve
+    name: wash_valve
+    position: B
+  - op: set_valve
     name: sample_valve
     position: B
   - op: set_valve
     name: sheath_valve
     position: B
   - op: move
-    axis: E2
+    axis: U
     by: 7200.0       # 20 rotations
     feedrate: 3600.0
   - op: dwell

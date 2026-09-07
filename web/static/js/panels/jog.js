@@ -42,6 +42,23 @@ export function mountJog(store, tbody, panelRoot) {
     } catch (e) { alert("Firmware read failed: " + e.message); }
   });
 
+  const output = document.getElementById("diagnostic-output");
+  async function showDiagnostic(label, call) {
+    if (output) output.textContent = `${label}: waiting…`;
+    try {
+      const result = await call();
+      if (output) output.textContent = JSON.stringify(result, null, 2);
+    } catch (e) {
+      if (output) output.textContent = `${label} failed: ${e.message}`;
+    }
+  }
+  document.getElementById("read-position")?.addEventListener("click", () =>
+    showDiagnostic("M114", () => api.position()));
+  document.getElementById("read-settings")?.addEventListener("click", () =>
+    showDiagnostic("M503", () => api.settings()));
+  document.getElementById("read-drivers")?.addEventListener("click", () =>
+    showDiagnostic("M122", () => api.drivers()));
+
   store.subscribe((state) => {
     // Update positions.
     for (const [axis, val] of Object.entries(state.positions || {})) {
@@ -49,10 +66,17 @@ export function mountJog(store, tbody, panelRoot) {
       if (cell) cell.textContent = (typeof val === "number") ? val.toFixed(3) : val;
     }
     // Lock motion buttons unless idle and connected.
-    const enabled = state.controllerState === "connected_idle" && state.wsConnected;
+    const enabled = state.controllerState === "connected_idle" && state.wsConnected && state.motionEnabled;
     const buttons = panelRoot.querySelectorAll("button[data-jog], button[data-home]");
     buttons.forEach((b) => { b.disabled = !enabled; });
     const homeAll = document.getElementById("home-all");
-    if (homeAll) homeAll.disabled = !(state.controllerState === "connected_idle" || state.controllerState === "errored");
+    if (homeAll) homeAll.disabled = !enabled;
+    const interlock = document.getElementById("motion-interlock");
+    if (interlock) {
+      const link = state.port ? `${state.port} @ ${state.baud}` : "no serial port";
+      interlock.textContent = state.motionEnabled
+        ? `Motion enabled · ${link}`
+        : `Diagnostics only · motion locked · ${link}`;
+    }
   });
 }

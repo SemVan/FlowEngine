@@ -17,3 +17,12 @@
 /* Mode panel --------------------------------------------------------- */
 #mode-buttons { display: flex; gap: .5rem; }
 #mode-buttons button { padding: .8rem 1.5rem; border: 1px solid var(--border); border-radius: 6px; background: #fff; font-weight: 600; }
+.jog-panel pre {
+  max-height: 20rem;
+  overflow: auto;
+  padding: 0.75rem;
+  white-space: pre-wrap;
+  background: #111820;
+  color: #d8e3ed;
+  border-radius: 0.35rem;
+}

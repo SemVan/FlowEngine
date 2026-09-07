@@ -7,17 +7,20 @@ silently defaulted. See docs/HARDWARE.md for the meaning of each field.
 
 from __future__ import annotations
 
-from enum import Enum
-from typing import Literal
+from enum import StrEnum
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-MarlinAxis = Literal["X", "Y", "Z", "E0", "E1", "E2", "E3", "E4"]
+# Marlin can be compiled with additional logical axes (A/B/C/U/etc.).  The
+# physical Monster8 socket name (for example E2) is not necessarily the G-code
+# axis exposed by that firmware build.
+MarlinAxis = Annotated[str, Field(pattern=r"^[A-Z](?:[0-9]+)?$")]
 HomeDirection = Literal["min", "max"]
 HomingStrategyName = Literal["endstop", "sensorless", "crash"]
 
 
-class DeviceKind(str, Enum):
+class DeviceKind(StrEnum):
     SYRINGE_PUMP = "syringe_pump"
     PERISTALTIC_PUMP = "peristaltic_pump"
     VALVE = "valve"

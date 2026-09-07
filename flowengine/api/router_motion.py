@@ -8,6 +8,7 @@ guards against UI retries during transient network blips.
 from __future__ import annotations
 
 import logging
+from functools import wraps
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -40,6 +41,7 @@ def _idem_put(key: str | None, value: dict[str, Any]) -> None:
 
 
 def _wrap_errors(fn):  # type: ignore[no-untyped-def]
+    @wraps(fn)
     async def inner(*args, **kwargs):  # type: ignore[no-untyped-def]
         try:
             return await fn(*args, **kwargs)
@@ -51,7 +53,16 @@ def _wrap_errors(fn):  # type: ignore[no-untyped-def]
             raise HTTPException(status_code=502, detail=f"controller: {e}") from e
         except TransportError as e:
             raise HTTPException(status_code=503, detail=f"transport: {e}") from e
+
     return inner
+
+
+def _require_motion_enabled(ctx: AppContext) -> None:
+    if ctx.transport.name != "mock" and not ctx.runtime.motion.enabled:
+        raise StateError(
+            "motion interlock is disabled; verify the firmware axis map and limits, "
+            "then set runtime.motion.enabled=true"
+        )
 
 
 @router.post("/jog")
@@ -64,6 +75,7 @@ async def jog(
     cached = _idem_get(idempotency_key)
     if cached:
         return cached
+    _require_motion_enabled(ctx)
     ctx.state.require(State.CONNECTED_IDLE)
     await ctx.state.transition(State.MOVING, detail=f"jog {body.axis} {body.delta:+.3f}")
     try:
@@ -87,6 +99,7 @@ async def move(
     cached = _idem_get(idempotency_key)
     if cached:
         return cached
+    _require_motion_enabled(ctx)
     ctx.state.require(State.CONNECTED_IDLE)
     await ctx.state.transition(State.MOVING, detail=f"move {body.axis}→{body.target:.3f}")
     try:
@@ -103,6 +116,7 @@ async def move(
 @router.post("/home")
 @_wrap_errors
 async def home(body: HomeRequest, ctx: AppContext = Depends(get_ctx)):
+    _require_motion_enabled(ctx)
     ctx.state.require(State.CONNECTED_IDLE, State.ERRORED)
     await ctx.state.transition(State.HOMING, detail=f"home {body.axes or 'all'}")
     try:

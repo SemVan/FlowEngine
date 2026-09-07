@@ -14,7 +14,6 @@ from pathlib import Path
 
 from platformdirs import user_config_dir
 
-
 REPO_CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
@@ -24,8 +23,8 @@ class AppSettings:
     host: str = "127.0.0.1"
     port: int = 8765
     profile: str = "default"
-    serial_port: str = "/dev/ttyACM0"
-    serial_baud: int = 250_000
+    serial_port: str | None = None
+    serial_baud: int | None = None
     mock: bool = False
     log_level: str = "INFO"
 
@@ -36,8 +35,10 @@ class AppSettings:
             host=env.get("FLOWENGINE_HOST", "127.0.0.1"),
             port=int(env.get("FLOWENGINE_PORT", "8765")),
             profile=env.get("FLOWENGINE_PROFILE", "default"),
-            serial_port=env.get("FLOWENGINE_SERIAL_PORT", "/dev/ttyACM0"),
-            serial_baud=int(env.get("FLOWENGINE_SERIAL_BAUD", "250000")),
+            serial_port=env.get("FLOWENGINE_SERIAL_PORT"),
+            serial_baud=(
+                int(env["FLOWENGINE_SERIAL_BAUD"]) if "FLOWENGINE_SERIAL_BAUD" in env else None
+            ),
             mock=env.get("FLOWENGINE_MOCK", "0") not in {"0", "", "false", "False"},
             log_level=env.get("FLOWENGINE_LOG_LEVEL", "INFO"),
         )
@@ -51,10 +52,15 @@ class AppSettings:
         ap.add_argument("--profile", default=defaults.profile)
         ap.add_argument("--serial-port", default=defaults.serial_port)
         ap.add_argument("--serial-baud", type=int, default=defaults.serial_baud)
-        ap.add_argument("--mock", action="store_true", default=defaults.mock,
-                        help="Use MockTransport (no hardware required).")
-        ap.add_argument("--log-level", default=defaults.log_level,
-                        choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+        ap.add_argument(
+            "--mock",
+            action="store_true",
+            default=defaults.mock,
+            help="Use MockTransport (no hardware required).",
+        )
+        ap.add_argument(
+            "--log-level", default=defaults.log_level, choices=["DEBUG", "INFO", "WARNING", "ERROR"]
+        )
         ns = ap.parse_args(argv)
         return cls(
             host=ns.host,

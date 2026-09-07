@@ -45,18 +45,35 @@ def test_device_map_rejects_duplicate_axes():
 
 def test_runtime_defaults_load():
     rp = RuntimeParams()
-    assert rp.transport.baud == 250_000
+    assert rp.transport.baud == 115_200
+    assert rp.motion.enabled is False
+    assert rp.motion.configure_firmware is False
     assert rp.timeouts.move > rp.timeouts.diagnostics
+
+
+def test_custom_marlin_axis_is_supported():
+    axis = AxisConfig(
+        marlin_axis="U",
+        name="wash",
+        kind=DeviceKind.PERISTALTIC_PUMP,
+        steps_per_unit=1,
+        travel=100,
+        home_direction="min",
+        feedrate_default=10,
+        feedrate_max=20,
+    )
+    assert axis.marlin_axis == "U"
 
 
 def test_procedure_discriminated_union():
     p = Procedure(
-        name="t", steps=[
+        name="t",
+        steps=[
             {"op": "home", "axes": ["X"]},
             {"op": "move", "axis": "X", "to": 5.0},
             {"op": "dwell", "seconds": 1.0},
             {"op": "log", "message": "ok"},
-        ]
+        ],
     )
     assert len(p.steps) == 4
     assert p.steps[1].op == "move"  # type: ignore[union-attr]

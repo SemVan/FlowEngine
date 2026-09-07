@@ -67,6 +67,18 @@ def test_position():
     assert r.positions["X"] == 10.5 and r.positions["E"] == 0.0
 
 
+def test_position_with_custom_axes():
+    r = parse_line("X:1.00 A:-2.50 U:7.00")
+    assert isinstance(r, PositionResponse)
+    assert r.positions == {"X": 1.0, "A": -2.5, "U": 7.0}
+
+
+def test_capability_on_separate_line():
+    r = parse_line("Cap:CHECKSUM:1")
+    assert isinstance(r, FirmwareCapsResponse)
+    assert r.capabilities == frozenset({"CHECKSUM"})
+
+
 def test_firmware_caps():
     r = parse_line("FIRMWARE_NAME:Marlin 2.1.2 Cap:CHECKSUM:1 Cap:AUTOREPORT_TEMP:0")
     assert isinstance(r, FirmwareCapsResponse)
@@ -79,11 +91,12 @@ def test_kill():
 
 
 def test_endstops_aggregate():
-    lines = ["x_min: TRIGGERED", "y_min: open", "z_max: open"]
+    lines = ["x_min: TRIGGERED", "y_min: open", "z_max: open", "u_min: TRIGGERED"]
     agg = aggregate_endstops(lines)
     assert isinstance(agg, EndstopsResponse)
     assert agg.triggered["x_min"] is True
     assert agg.triggered["y_min"] is False
+    assert agg.triggered["u_min"] is True
 
 
 def test_unknown_returns_other():
@@ -109,4 +122,4 @@ def test_framing(line, expected_cs):
 
 
 def test_checksum_xor():
-    assert make_checksum("N0 M110 N0") == 27  # known XOR result
+    assert make_checksum("N0 M110 N0") == 125  # known XOR result

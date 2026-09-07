@@ -2,14 +2,12 @@
 
 firmware:
   flavor: marlin
-  features_required:
-    - CHECKSUM        # we send N<n> ... *<cs>; firmware must accept it
-    # Add M114_DETAIL if your build reports it. Don't include features your
-    # firmware doesn't advertise — the connect probe will refuse to start.
+  features_required: []       # populate after inspecting this board's M115 response
+  use_line_numbers: false  # first bring-up uses plain G-code; enable only after verification
 
 transport:
-  port: /dev/ttyACM0
-  baud: 250000
+  port: auto          # resolves USB CDC Marlin on Linux, macOS, or Windows
+  baud: 115200        # value used successfully by the existing hardware prototype
   reconnect_attempts: 5
   reconnect_backoff_s: 1.0
 
@@ -22,6 +20,8 @@ timeouts:
 motion:
   feedrate_cap: 3000.0
   jog_step_default: 1.0
+  enabled: false              # diagnostics-only until the physical axis map is verified
+  configure_firmware: false   # never send placeholder M92/M203 values on first connection
 
 pressure:
   source: manual            # Phase 1 default — see docs/HARDWARE.md to switch

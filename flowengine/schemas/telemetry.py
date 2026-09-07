@@ -19,9 +19,7 @@ class PositionUpdate(_WsBase):
 
 class StateUpdate(_WsBase):
     type: Literal["state"] = "state"
-    state: Literal[
-        "disconnected", "connected_idle", "homing", "moving", "aborting", "errored"
-    ]
+    state: Literal["disconnected", "connected_idle", "homing", "moving", "aborting", "errored"]
     detail: str = ""
 
 

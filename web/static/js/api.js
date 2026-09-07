@@ -28,6 +28,9 @@ export const api = {
   config() { return request("/api/config"); },
   firmware() { return request("/api/diagnostics/firmware"); },
   endstops() { return request("/api/diagnostics/endstops"); },
+  position() { return request("/api/diagnostics/position"); },
+  settings() { return request("/api/diagnostics/settings"); },
+  drivers() { return request("/api/diagnostics/drivers"); },
   jog(axis, delta, feedrate) {
     return request("/api/jog", {
       method: "POST",
@@ -48,4 +51,7 @@ export const api = {
   stop() { return request("/api/stop", { method: "POST" }); },
   procedures() { return request("/api/procedures"); },
   procedure(name) { return request(`/api/procedures/${encodeURIComponent(name)}`); },
+  runProcedure(name) { return request(`/api/procedures/${encodeURIComponent(name)}/run`, { method: "POST" }); },
+  procedureStatus() { return request("/api/procedures/status"); },
+  abortProcedure() { return request("/api/procedures/abort", { method: "POST" }); },
 };

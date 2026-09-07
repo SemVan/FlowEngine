@@ -12,8 +12,12 @@ class FirmwareExpectation(BaseModel):
 
     flavor: Literal["marlin", "klipper"] = "marlin"
     features_required: list[str] = Field(
-        default_factory=lambda: ["CHECKSUM"],
+        default_factory=list,
         description="Feature tokens that must appear in M115 capabilities.",
+    )
+    use_line_numbers: bool = Field(
+        default=False,
+        description="Frame commands as N<line> ... *<checksum>. Enable only after probing firmware.",
     )
 
 
@@ -21,7 +25,7 @@ class TransportConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     port: str = "/dev/ttyACM0"
-    baud: int = 250000
+    baud: int = 115200
     reconnect_attempts: int = Field(default=5, ge=0)
     reconnect_backoff_s: float = Field(default=1.0, gt=0)
 
@@ -43,6 +47,14 @@ class MotionLimits(BaseModel):
     feedrate_cap: float = Field(default=3000.0, gt=0, description="Hard cap, units/min.")
     accel_cap: float | None = Field(default=None, gt=0)
     jog_step_default: float = Field(default=1.0, gt=0)
+    enabled: bool = Field(
+        default=False,
+        description="Master interlock. Keep false until the axis map and limits are verified on hardware.",
+    )
+    configure_firmware: bool = Field(
+        default=False,
+        description="Send M92/M203 at startup. Unsafe while device-map values are placeholders.",
+    )
 
 
 class PressureConfig(BaseModel):

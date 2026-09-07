@@ -27,7 +27,13 @@ class State(str, Enum):
 
 _LEGAL: dict[State, set[State]] = {
     State.DISCONNECTED: {State.CONNECTED_IDLE, State.ERRORED},
-    State.CONNECTED_IDLE: {State.HOMING, State.MOVING, State.DISCONNECTED, State.ERRORED, State.ABORTING},
+    State.CONNECTED_IDLE: {
+        State.HOMING,
+        State.MOVING,
+        State.DISCONNECTED,
+        State.ERRORED,
+        State.ABORTING,
+    },
     State.HOMING: {State.CONNECTED_IDLE, State.ABORTING, State.ERRORED, State.DISCONNECTED},
     State.MOVING: {State.CONNECTED_IDLE, State.ABORTING, State.ERRORED, State.DISCONNECTED},
     State.ABORTING: {State.CONNECTED_IDLE, State.ERRORED, State.DISCONNECTED},

@@ -101,6 +101,8 @@ class CommandQueue:
         result = CommandResult(ok=False)
         deadline = asyncio.get_running_loop().time() + timeout
         endstop_lines: list[str] = []
+        firmware_lines: list[str] = []
+        firmware_caps: set[str] = set()
         while True:
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
@@ -116,6 +118,9 @@ class CommandQueue:
                     if endstop_lines:
                         agg = aggregate_endstops(endstop_lines)
                         result.endstops = agg.triggered
+                    if firmware_lines:
+                        result.firmware_raw = "\n".join(firmware_lines)
+                        result.firmware_caps = frozenset(firmware_caps)
                     result.ok = True
                     return result
                 case EchoLine() | BusyEcho() | TemperatureResponse():
@@ -128,8 +133,8 @@ class CommandQueue:
                 case EndstopsResponse():
                     endstop_lines.append(line)
                 case FirmwareCapsResponse(raw=raw, capabilities=caps):
-                    result.firmware_raw = raw
-                    result.firmware_caps = caps
+                    firmware_lines.append(raw)
+                    firmware_caps.update(caps)
                 case ErrorResponse(message=msg):
                     if "checksum" in msg.lower() or "line number" in msg.lower():
                         # The transport gets the resend request *separately* on the next line.

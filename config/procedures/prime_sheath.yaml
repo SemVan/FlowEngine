@@ -3,13 +3,13 @@ description: "Prime the sheath line via sheath syringe."
 version: 1
 steps:
   - op: home
-    axes: [E1]
+    axes: [Y]
   - op: set_valve
     name: sheath_valve
     position: A
   - op: move
-    axis: E1
-    by: 40.0
+    axis: Y
+    by: -40.0
     feedrate: 400.0
   - op: dwell
     seconds: 2

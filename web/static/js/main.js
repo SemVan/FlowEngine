@@ -15,6 +15,9 @@ const store = createStore({
   log: [],
   wsConnected: false,
   queueDepth: 0,
+  motionEnabled: false,
+  port: null,
+  baud: null,
 });
 
 connectWs(store);
@@ -39,5 +42,8 @@ api.state().then((s) => {
     controllerDetail: s.detail,
     positions: s.positions,
     queueDepth: s.queue_depth,
+    motionEnabled: s.motion_enabled,
+    port: s.port,
+    baud: s.baud,
   });
 }).catch(() => {});

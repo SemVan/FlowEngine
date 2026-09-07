@@ -26,7 +26,8 @@ from flowengine.transport.base import Transport
 
 log = logging.getLogger(__name__)
 
-_AXIS_TOKEN = re.compile(r"([XYZE]\d*)([-+]?\d+(?:\.\d+)?)")
+_AXIS_TOKEN = re.compile(r"([XYZABCUVWIJKE]\d*)([-+]?\d+(?:\.\d+)?)")
+_HOME_AXIS_TOKEN = re.compile(r"\b([XYZABCUVWIJKE]\d*)\b")
 _LINE_PREFIX = re.compile(r"^\s*N(\d+)\s+(.*?)\*\d+\s*$")
 
 
@@ -110,7 +111,7 @@ class MockTransport(Transport):
             if timeout is None:
                 return await self._inbox.get()
             return await asyncio.wait_for(self._inbox.get(), timeout=timeout)
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             raise TransportTimeout(f"no response within {timeout}s") from e
 
     # --- private --------------------------------------------------------
@@ -129,12 +130,16 @@ class MockTransport(Transport):
             await self._inbox.put("ok")
             return
         if p == "M115" or p.startswith("M115"):
-            await self._inbox.put("FIRMWARE_NAME:MockMarlin 2.x SOURCE_CODE_URL:mock Cap:CHECKSUM:1 Cap:M114_DETAIL:1")
+            await self._inbox.put(
+                "FIRMWARE_NAME:MockMarlin 2.x SOURCE_CODE_URL:mock Cap:CHECKSUM:1 Cap:M114_DETAIL:1"
+            )
             await self._inbox.put("ok")
             return
         if p.startswith("M119"):
             for axis in ("x", "y", "z"):
-                await self._inbox.put(f"{axis}_min: {'TRIGGERED' if self._homed.get(axis.upper(), False) else 'open'}")
+                await self._inbox.put(
+                    f"{axis}_min: {'TRIGGERED' if self._homed.get(axis.upper(), False) else 'open'}"
+                )
             await self._inbox.put("ok")
             return
         if p.startswith("M114"):
@@ -145,7 +150,13 @@ class MockTransport(Transport):
             await self._inbox.put(f"X:{x:.2f} Y:{y:.2f} Z:{z:.2f} E:{e:.2f}")
             await self._inbox.put("ok")
             return
-        if p.startswith("M400") or p.startswith("M105") or p.startswith("M201") or p.startswith("M203") or p.startswith("M906"):
+        if (
+            p.startswith("M400")
+            or p.startswith("M105")
+            or p.startswith("M201")
+            or p.startswith("M203")
+            or p.startswith("M906")
+        ):
             await self._inbox.put("ok")
             return
         if p.startswith("M410"):
@@ -169,7 +180,11 @@ class MockTransport(Transport):
             await self._inbox.put("ok")
             return
         if p.startswith("G28"):
-            tokens = [a for a, _ in _AXIS_TOKEN.findall(payload)] or list(self._positions.keys()) or ["X", "Y", "Z"]
+            tokens = (
+                _HOME_AXIS_TOKEN.findall(payload[3:])
+                or list(self._positions.keys())
+                or ["X", "Y", "Z"]
+            )
             for axis in tokens:
                 self._positions[axis] = 0.0
                 self._homed[axis] = True

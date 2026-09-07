@@ -41,11 +41,31 @@ class _JsonlAuditHandler(logging.Handler):
                 "event": record.getMessage(),
             }
             for k, v in record.__dict__.items():
-                if k in ("args", "msg", "levelname", "levelno", "name", "pathname",
-                         "filename", "module", "exc_info", "exc_text", "stack_info",
-                         "lineno", "funcName", "created", "msecs", "relativeCreated",
-                         "thread", "threadName", "processName", "process", "audit",
-                         "message", "asctime"):
+                if k in (
+                    "args",
+                    "msg",
+                    "levelname",
+                    "levelno",
+                    "name",
+                    "pathname",
+                    "filename",
+                    "module",
+                    "exc_info",
+                    "exc_text",
+                    "stack_info",
+                    "lineno",
+                    "funcName",
+                    "created",
+                    "msecs",
+                    "relativeCreated",
+                    "thread",
+                    "threadName",
+                    "processName",
+                    "process",
+                    "audit",
+                    "message",
+                    "asctime",
+                ):
                     continue
                 payload[k] = v
             with self._path.open("a", encoding="utf-8") as f:

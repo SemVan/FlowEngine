@@ -23,16 +23,24 @@ async def telemetry_ws(ws: WebSocket):
     await ws.accept()
     ctx = ws.app.state.ctx
     # Initial snapshot so the UI can paint before the next event arrives.
-    await ws.send_text(json.dumps({
-        "type": "state",
-        "state": ctx.state.state.value,
-        "detail": ctx.state.detail,
-    }))
-    await ws.send_text(json.dumps({
-        "type": "position",
-        "positions": ctx.motion.positions,
-        "settled": False,
-    }))
+    await ws.send_text(
+        json.dumps(
+            {
+                "type": "state",
+                "state": ctx.state.state.value,
+                "detail": ctx.state.detail,
+            }
+        )
+    )
+    await ws.send_text(
+        json.dumps(
+            {
+                "type": "position",
+                "positions": ctx.motion.positions,
+                "settled": False,
+            }
+        )
+    )
     async with ctx.events.subscribe() as queue:
         try:
             while True:

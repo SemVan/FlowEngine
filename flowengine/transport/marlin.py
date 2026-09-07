@@ -22,6 +22,7 @@ from typing import Literal
 
 import serial  # pyserial
 import serial_asyncio  # pyserial-asyncio
+from serial.tools import list_ports
 
 from flowengine.errors import TransportClosed, TransportProtocolError, TransportTimeout
 from flowengine.transport.base import Transport
@@ -30,12 +31,34 @@ from flowengine.transport.parser import frame_with_line_number
 log = logging.getLogger(__name__)
 
 
+def discover_marlin_port(configured: str | None = None) -> str:
+    """Resolve the USB CDC Marlin port across Linux, macOS, and Windows."""
+    ports = list(list_ports.comports())
+    if configured and configured.lower() != "auto":
+        if any(port.device == configured for port in ports):
+            return configured
+        log.warning("configured serial port %s is absent; trying auto-discovery", configured)
+    matches = [
+        port
+        for port in ports
+        if (port.vid, port.pid) == (0x0483, 0x5740) or "marlin" in (port.product or "").lower()
+    ]
+    if len(matches) == 1:
+        return matches[0].device
+    if not matches:
+        visible = ", ".join(port.device for port in ports) or "none"
+        raise TransportProtocolError(f"Marlin USB serial port not found (visible: {visible})")
+    devices = ", ".join(port.device for port in matches)
+    raise TransportProtocolError(f"multiple Marlin serial ports found: {devices}")
+
+
 class MarlinTransport(Transport):
     name: Literal["marlin", "mock", "klipper"] = "marlin"
 
-    def __init__(self, port: str, baud: int = 250_000) -> None:
+    def __init__(self, port: str, baud: int = 115_200, *, use_line_numbers: bool = False) -> None:
         self._port = port
         self._baud = baud
+        self._use_line_numbers = use_line_numbers
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._line_no = 1
@@ -69,16 +92,27 @@ class MarlinTransport(Transport):
                 break
             try:
                 line = await asyncio.wait_for(self._inbox.get(), timeout=remaining)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 break
             if line.strip().lower() == "start":
                 saw_start = True
                 break
         if not saw_start:
             log.warning("did not see Marlin 'start' banner within 10s, proceeding anyway")
-        # Reset Marlin's line-number counter to ours.
-        await self.send_line("M110 N0", _bypass_lineno=True)
+        # Do not leave an unconsumed M110 `ok` in the inbox: it would be
+        # mistaken for the acknowledgement of the next command.
+        if self._use_line_numbers:
+            await self.send_line("M110 N0", _bypass_lineno=True)
+            await self._wait_for_reset_ok()
         log.info("marlin transport opened on %s @ %d", self._port, self._baud)
+
+    @property
+    def port(self) -> str:
+        return self._port
+
+    @property
+    def baud(self) -> int:
+        return self._baud
 
     async def close(self) -> None:
         self._closed = True
@@ -102,7 +136,7 @@ class MarlinTransport(Transport):
             raise TransportClosed("marlin transport is not open")
         async with self._send_lock:
             payload = line.strip()
-            if _bypass_lineno:
+            if _bypass_lineno or not self._use_line_numbers:
                 # Used only for M110 (reset line counter) — itself unframed.
                 framed = payload
             else:
@@ -119,6 +153,18 @@ class MarlinTransport(Transport):
             await self._writer.drain()
             log.debug("→ %s", framed)
 
+    async def _wait_for_reset_ok(self) -> None:
+        deadline = time.monotonic() + 3.0
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TransportTimeout("no ok after M110 line-number reset")
+            line = await self.read_line(timeout=remaining)
+            if line.strip().lower().startswith("ok"):
+                return
+            if line.strip().lower().startswith("error"):
+                raise TransportProtocolError(f"M110 line-number reset failed: {line}")
+
     async def read_line(self, timeout: float | None = None) -> str:
         if self._closed:
             raise TransportClosed("marlin transport is not open")
@@ -126,7 +172,7 @@ class MarlinTransport(Transport):
             if timeout is None:
                 return await self._inbox.get()
             return await asyncio.wait_for(self._inbox.get(), timeout=timeout)
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             raise TransportTimeout(f"no response within {timeout}s") from e
 
     async def resend(self, line_no: int) -> None:
@@ -158,6 +204,6 @@ class MarlinTransport(Transport):
                 await self._inbox.put(line)
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("marlin read loop crashed")
             self._closed = True

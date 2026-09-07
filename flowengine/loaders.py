@@ -43,7 +43,10 @@ def load_modes() -> ModesConfig:
 def list_procedures() -> list[Path]:
     """Return every .yaml under repo config/procedures plus user overlay procedures."""
     out: list[Path] = []
-    for base in (REPO_CONFIG_DIR / "procedures", resolve_config_file("procedures").parent / "procedures"):
+    for base in (
+        REPO_CONFIG_DIR / "procedures",
+        resolve_config_file("procedures").parent / "procedures",
+    ):
         if base.is_dir():
             for p in sorted(base.glob("*.yaml")):
                 if p not in out:

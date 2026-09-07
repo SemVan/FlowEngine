@@ -3,6 +3,6 @@ description: "Home every axis. Safe baseline before any other procedure."
 version: 1
 steps:
   - op: home
-    axes: [X, Y, Z, E0, E1, E2, E3, E4]
+    axes: [X, Y, A, B, C]
   - op: log
     message: "all axes homed"

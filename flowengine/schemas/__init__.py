@@ -1,6 +1,7 @@
 """Pydantic schemas — single source of truth for config + API + telemetry shapes."""
 
 from flowengine.schemas.api import (
+    DiagnosticResponse,
     EndstopsSnapshot,
     FirmwareInfo,
     HomeRequest,
@@ -54,6 +55,7 @@ __all__ = [
     "CheckpointStep",
     "DeviceKind",
     "DeviceMap",
+    "DiagnosticResponse",
     "DwellStep",
     "EndstopUpdate",
     "EndstopsSnapshot",

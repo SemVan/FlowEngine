@@ -3,12 +3,12 @@ description: "Prime the sample line: valve A → push syringe → settle."
 version: 1
 steps:
   - op: home
-    axes: [E0]
+    axes: [X]
   - op: set_valve
     name: sample_valve
     position: A
   - op: move
-    axis: E0
+    axis: X
     by: 30.0
     feedrate: 300.0
   - op: dwell

@@ -111,8 +111,8 @@ Response = (
 
 _RESEND_RE = re.compile(r"^\s*Resend\s*:?\s*N?(\d+)", re.IGNORECASE)
 _RESEND_ALT_RE = re.compile(r"Last Line:\s*N?(\d+)", re.IGNORECASE)
-_POS_TOKEN_RE = re.compile(r"([XYZE]\d*):\s*(-?\d+(?:\.\d+)?)")
-_ENDSTOP_RE = re.compile(r"^\s*([xyz]_(?:min|max)|_(?:min|max))\s*:\s*(\S+)", re.IGNORECASE)
+_POS_TOKEN_RE = re.compile(r"([A-Z]):\s*(-?\d+(?:\.\d+)?)")
+_ENDSTOP_RE = re.compile(r"^\s*([a-z]_(?:min|max)|_(?:min|max))\s*:\s*(\S+)", re.IGNORECASE)
 _CAP_RE = re.compile(r"Cap:([A-Z0-9_]+):(\d)")
 
 
@@ -141,13 +141,13 @@ def parse_line(line: str) -> Response:
     if low == "!!" or low.startswith("!! "):
         return KillResponse(raw=line)
 
+    if low.startswith("error:") or low.startswith("error "):
+        return ErrorResponse(message=stripped.split(":", 1)[-1].strip(), raw=line)
+
     if low.startswith("resend") or "last line" in low:
         m = _RESEND_RE.search(stripped) or _RESEND_ALT_RE.search(stripped)
         if m:
             return ResendRequest(line_number=int(m.group(1)), raw=line)
-
-    if low.startswith("error:") or low.startswith("error "):
-        return ErrorResponse(message=stripped.split(":", 1)[-1].strip(), raw=line)
 
     if low.startswith("echo:busy"):
         return BusyEcho(raw=line)
@@ -158,16 +158,22 @@ def parse_line(line: str) -> Response:
     if stripped.startswith("T:") or stripped.startswith("B:"):
         return TemperatureResponse(raw=line)
 
+    # `FIRMWARE_NAME:Marlin ...`
+    if stripped.startswith("FIRMWARE_NAME"):
+        caps = {m.group(1) for m in _CAP_RE.finditer(stripped) if m.group(2) == "1"}
+        return FirmwareCapsResponse(raw=line, capabilities=frozenset(caps))
+
+    # Many Marlin builds print capabilities on separate lines after the main
+    # FIRMWARE_NAME line.
+    if stripped.startswith("Cap:"):
+        caps = {m.group(1) for m in _CAP_RE.finditer(stripped) if m.group(2) == "1"}
+        return FirmwareCapsResponse(raw=line, capabilities=frozenset(caps))
+
     # M114 position response: "X:10.00 Y:0.00 Z:0.00 E:0.00 Count X:80 Y:0 Z:0"
     if _POS_TOKEN_RE.search(stripped) and " Count " not in stripped[:3]:
         tokens = dict(_POS_TOKEN_RE.findall(stripped))
         if tokens:
             return PositionResponse(positions={k: float(v) for k, v in tokens.items()}, raw=line)
-
-    # `FIRMWARE_NAME:Marlin ...`
-    if stripped.startswith("FIRMWARE_NAME"):
-        caps = {m.group(1) for m in _CAP_RE.finditer(stripped) if m.group(2) == "1"}
-        return FirmwareCapsResponse(raw=line, capabilities=frozenset(caps))
 
     if _ENDSTOP_RE.match(stripped):
         return EndstopsResponse(triggered=_parse_endstop_block(stripped), raw=line)

@@ -26,21 +26,20 @@ class MoveRequest(BaseModel):
 class HomeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    axes: list[str] | None = Field(
-        default=None, description="None = home all axes per device map."
-    )
+    axes: list[str] | None = Field(default=None, description="None = home all axes per device map.")
 
 
 class StateResponse(BaseModel):
-    state: Literal[
-        "disconnected", "connected_idle", "homing", "moving", "aborting", "errored"
-    ]
+    state: Literal["disconnected", "connected_idle", "homing", "moving", "aborting", "errored"]
     detail: str
     positions: dict[str, float]
     homed: dict[str, bool]
     queue_depth: int
     firmware: str | None
     transport: Literal["marlin", "mock", "klipper"]
+    port: str | None = None
+    baud: int | None = None
+    motion_enabled: bool
 
 
 class FirmwareInfo(BaseModel):
@@ -52,3 +51,9 @@ class FirmwareInfo(BaseModel):
 class EndstopsSnapshot(BaseModel):
     triggered: dict[str, bool]
     raw: str
+
+
+class DiagnosticResponse(BaseModel):
+    command: str
+    raw: list[str]
+    positions: dict[str, float] | None = None

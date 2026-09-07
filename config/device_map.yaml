@@ -1,136 +1,104 @@
-# Device map — physical hardware → Marlin axes.
-#
-# IMPORTANT: every numeric field below is a PLACEHOLDER until bring-up.
-# See docs/HARDWARE.md for the procedure to fill these in for your instrument.
-#
-# Marlin axis assignment for Monster8 MK2 (8 driver slots):
-#   X  → autosampler X
-#   Y  → autosampler Y
-#   Z  → autosampler Z
-#   E0 → sample syringe
-#   E1 → sheath syringe
-#   E2 → peristaltic wash pump
-#   E3 → sample-line valve (2-pos)
-#   E4 → sheath-line valve (2-pos)
+# Device map reconstructed from the firmware (M114/M503) and the prototype
+# configuration in cytonator3000. Physical Monster8 sockets are documented in
+# docs/HARDWARE.md. Motion stays interlocked until wiring is checked.
 
-instrument_id: "flowengine-dev-001"
+instrument_id: "cytonator-monster8"
 
 axes:
   - marlin_axis: X
-    name: autosampler_x
-    kind: autosampler_axis
-    steps_per_unit: 80.0       # TODO(hardware): set by linear-screw pitch
-    units: mm
-    travel: 200.0              # TODO(hardware): measure at bring-up
-    home_direction: min
-    feedrate_default: 600.0
-    feedrate_max: 3000.0
-    notes: "Wired-OR endstops at both ends; soft limit enforced in software."
-
-  - marlin_axis: Y
-    name: autosampler_y
-    kind: autosampler_axis
-    steps_per_unit: 80.0
-    units: mm
-    travel: 200.0
-    home_direction: min
-    feedrate_default: 600.0
-    feedrate_max: 3000.0
-
-  - marlin_axis: Z
-    name: autosampler_z
-    kind: autosampler_axis
-    steps_per_unit: 400.0
-    units: mm
-    travel: 80.0
-    home_direction: max        # Z-up → home at the top, away from samples
-    feedrate_default: 300.0
-    feedrate_max: 1200.0
-
-  - marlin_axis: E0
     name: sample_syringe
     kind: syringe_pump
-    steps_per_unit: 400.0      # TODO(hardware): leadscrew + driver microsteps
+    steps_per_unit: 80.0
     units: mm
-    travel: 60.0               # syringe stroke
-    home_direction: min        # home at "empty"
-    feedrate_default: 200.0
-    feedrate_max: 800.0
-    notes: "Two endstops wired-OR on one channel (top + bottom of stroke)."
+    travel: 146.2508767
+    home_direction: min
+    feedrate_default: 1030.0
+    feedrate_max: 1200.0
+    notes: "Prototype name: Насос сэмплера; logical X, physical DRIVER0."
 
-  - marlin_axis: E1
+  - marlin_axis: Y
     name: sheath_syringe
     kind: syringe_pump
-    steps_per_unit: 400.0
+    steps_per_unit: 80.0
     units: mm
-    travel: 60.0
-    home_direction: min
-    feedrate_default: 200.0
-    feedrate_max: 800.0
+    travel: 321.31221
+    home_direction: max
+    feedrate_default: 1200.0
+    feedrate_max: 1200.0
+    notes: "Prototype name: Насос шифа; logical Y, physical DRIVER1. Prototype requested 2000 but firmware M203 caps it at 1200 mm/min."
 
-  - marlin_axis: E2
-    name: wash_peristaltic
-    kind: peristaltic_pump
-    steps_per_unit: 17.78      # ≈ 6400 steps/rev / 360 deg
-    units: deg
-    travel: 36000.0            # ~100 rotations — soft cap, can be revised
-    home_direction: min
-    feedrate_default: 1800.0
-    feedrate_max: 7200.0
-    notes: "Encoder feedback. Phase 3 will use it to detect missed steps."
-
-  - marlin_axis: E3
-    name: sample_valve_axis
+  - marlin_axis: A
+    name: wash_valve_axis
     kind: valve
-    steps_per_unit: 17.78
-    units: deg
-    travel: 90.0               # 2-position rotor: 90° between A and B
-    home_direction: min
-    feedrate_default: 300.0
-    feedrate_max: 900.0
+    steps_per_unit: 80.0
+    units: mm
+    travel: 9.42227
+    home_direction: max
+    feedrate_default: 600.0
+    feedrate_max: 1200.0
+    notes: "Logical A, physical DRIVER3 / E0 socket."
 
-  - marlin_axis: E4
+  - marlin_axis: B
     name: sheath_valve_axis
     kind: valve
-    steps_per_unit: 17.78
-    units: deg
-    travel: 90.0
+    steps_per_unit: 80.0
+    units: mm
+    travel: 12.81382
+    home_direction: max
+    feedrate_default: 600.0
+    feedrate_max: 1200.0
+    notes: "Logical B, physical DRIVER4 / E1 socket."
+
+  - marlin_axis: C
+    name: sample_valve_axis
+    kind: valve
+    steps_per_unit: 80.0
+    units: mm
+    travel: 10.1065
+    home_direction: max
+    feedrate_default: 600.0
+    feedrate_max: 1200.0
+    notes: "Logical C, physical DRIVER5 / E2 socket."
+
+  - marlin_axis: U
+    name: wash_peristaltic
+    kind: peristaltic_pump
+    steps_per_unit: 80.0
+    units: mm
+    travel: 36000.0
     home_direction: min
-    feedrate_default: 300.0
-    feedrate_max: 900.0
+    feedrate_default: 1200.0
+    feedrate_max: 1200.0
+    endstop_channels_shared: false
+    notes: "Logical U, physical DRIVER6 / E3 socket. Travel and volume require calibration."
 
 valves:
-  - name: sample_valve
-    axis: E3
+  - name: wash_valve
+    axis: A
     position_a: 0.0
-    position_b: 90.0
+    position_b: -9.42227
     home_position: A
   - name: sheath_valve
-    axis: E4
+    axis: B
     position_a: 0.0
-    position_b: 90.0
+    position_b: -12.81382
+    home_position: A
+  - name: sample_valve
+    axis: C
+    position_a: 0.0
+    position_b: -10.1065
     home_position: A
 
 pumps:
   - name: sample_pump
-    axis: E0
+    axis: X
     kind: syringe
-    volume_per_unit_ul: 25.0   # TODO(hardware): depends on installed syringe
-    syringe_volume_ul: 1000.0
+    volume_per_unit_ul: 1.0  # placeholder: calibrate before volume-based control
   - name: sheath_pump
-    axis: E1
+    axis: Y
     kind: syringe
-    volume_per_unit_ul: 25.0
-    syringe_volume_ul: 1000.0
+    volume_per_unit_ul: 1.0  # placeholder: calibrate before volume-based control
   - name: wash_pump
-    axis: E2
+    axis: U
     kind: peristaltic
-    volume_per_unit_ul: 0.001  # µL per axis degree — TODO(hardware): calibrate
-    has_encoder: true
-
-autosampler:
-  name: autosampler
-  x_axis: X
-  y_axis: Y
-  z_axis: Z
-  safe_z: 60.0
+    volume_per_unit_ul: 1.0  # placeholder: calibrate before volume-based control
