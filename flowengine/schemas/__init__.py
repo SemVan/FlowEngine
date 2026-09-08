@@ -9,6 +9,7 @@ from flowengine.schemas.api import (
     MoveRequest,
     StateResponse,
 )
+from flowengine.schemas.configuration import ConfigurationProfile, RackCellOverride, RackConfig
 from flowengine.schemas.device import (
     AutosamplerConfig,
     AxisConfig,
@@ -19,6 +20,7 @@ from flowengine.schemas.device import (
 )
 from flowengine.schemas.mode import ModeDefinition, ModesConfig
 from flowengine.schemas.procedure import (
+    CallStep,
     CheckpointStep,
     DwellStep,
     HomeStep,
@@ -26,6 +28,7 @@ from flowengine.schemas.procedure import (
     MoveMultiStep,
     MoveStep,
     Procedure,
+    ProcedureParameter,
     SetParamStep,
     SetValveStep,
     Step,
@@ -52,7 +55,9 @@ from flowengine.schemas.telemetry import (
 __all__ = [
     "AutosamplerConfig",
     "AxisConfig",
+    "CallStep",
     "CheckpointStep",
+    "ConfigurationProfile",
     "DeviceKind",
     "DeviceMap",
     "DiagnosticResponse",
@@ -76,8 +81,11 @@ __all__ = [
     "PressureConfig",
     "PressureUpdate",
     "Procedure",
+    "ProcedureParameter",
     "PumpConfig",
     "QueueDepth",
+    "RackCellOverride",
+    "RackConfig",
     "RuntimeParams",
     "SetParamStep",
     "SetValveStep",

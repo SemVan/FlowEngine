@@ -1,0 +1,38 @@
+name: composite_wash_example
+description: "DRAFT EXAMPLE: a larger procedure reuses wash_user as one nested step."
+version: 1
+draft: true
+parameters:
+  valve_1:
+    type: string
+    default: null
+  valve_2:
+    type: string
+    default: null
+  valve_3:
+    type: string
+    default: null
+  wash_axis:
+    type: string
+    default: null
+  wash_travel:
+    type: number
+    default: null
+  wash_feedrate:
+    type: number
+    default: null
+    minimum: 0.01
+steps:
+  - op: log
+    message: "parent procedure started"
+  - op: call
+    procedure: wash_user
+    parameters:
+      valve_1: "${valve_1}"
+      valve_2: "${valve_2}"
+      valve_3: "${valve_3}"
+      wash_axis: "${wash_axis}"
+      wash_travel: "${wash_travel}"
+      wash_feedrate: "${wash_feedrate}"
+  - op: log
+    message: "parent procedure finished"

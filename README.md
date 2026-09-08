@@ -91,6 +91,9 @@ limits, and endstop polarity.
 - REST endpoints for jog / move / home / stop / diagnostics; WebSocket telemetry.
 - Read-only `M115`, `M114`, `M119`, `M503`, and `M122` diagnostics in the web UI.
 - YAML procedure execution for homing, moves, valve positions, dwell, and logging.
+- Developer procedure workbench: validated drafts, typed parameters, visual step builder,
+  dry preview, and deliberate one-step-at-a-time commissioning.
+- Saved configuration profiles and editable 8×12 autosampler rack geometry.
 - A reconstructed `X/Y/A/B/C/U` device map and matching example procedures.
 - Automated tests covering the parser, queue, limits, state, WebSocket, and mock stack.
 

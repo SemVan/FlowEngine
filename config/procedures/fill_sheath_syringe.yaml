@@ -1,0 +1,32 @@
+name: fill_sheath_syringe
+description: "DRAFT EXAMPLE: valve 3 → position 1, pump 2 aspirates. Fill parameters with the real device name, signed travel and speed."
+version: 1
+draft: true
+parameters:
+  valve_3:
+    type: string
+    description: "Configured name of valve 3."
+    default: null
+  pump_2_axis:
+    type: string
+    description: "Controller axis currently assigned to pump 2."
+    default: null
+  pump_travel:
+    type: number
+    description: "Signed pump 2 aspiration travel; units depend on calibration."
+    default: null
+  pump_feedrate:
+    type: number
+    description: "Pump 2 aspiration feedrate."
+    default: null
+    minimum: 0.01
+steps:
+  - op: set_valve
+    name: "${valve_3}"
+    position: A
+  - op: move
+    axis: "${pump_2_axis}"
+    by: "${pump_travel}"
+    feedrate: "${pump_feedrate}"
+  - op: checkpoint
+    name: "sheath syringe filled"

@@ -1,0 +1,13 @@
+name: example_8x12
+description: "Draft 8×12 rack geometry. Axes and dimensions must be measured before use."
+rows: 8
+columns: 12
+row_pitch: 9.0
+column_pitch: 9.0
+origin_x: 0.0
+origin_y: 0.0
+safe_z: null
+x_axis: null
+y_axis: null
+z_axis: null
+cells: []

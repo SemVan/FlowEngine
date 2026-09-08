@@ -1,12 +1,58 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="panel">
-  <h2>Procedures</h2>
-  <p class="phase-note">Execution follows the YAML steps and is protected by the motion interlock.</p>
+  <h2>Procedure workbench</h2>
+  <p class="phase-note">Drafts can be saved and previewed. A developer may deliberately run one selected step while commissioning hardware; a complete draft can never run.</p>
   <button id="reload-procs" type="button">Reload</button>
   <button id="abort-proc" type="button">Abort procedure</button>
   <ul id="proc-list"></ul>
-  <pre id="proc-detail"></pre>
+
+  <h3>Procedure</h3>
+  <div class="procedure-meta">
+    <label>Name <input id="proc-name" pattern="[A-Za-z0-9_-]+"></label>
+    <label>Description <input id="proc-description"></label>
+    <label class="inline-check"><input id="proc-draft" type="checkbox" checked> Draft</label>
+  </div>
+  <button id="new-proc" type="button">New</button>
+  <button id="save-proc" type="button">Validate &amp; save</button>
+  <button id="preview-proc" type="button">Save &amp; preview</button>
+  <button id="run-proc" type="button">Run complete procedure</button>
+
+  <h3>Steps</h3>
+  <ol id="proc-steps" class="procedure-steps"></ol>
+  <fieldset class="step-builder">
+    <legend>Add a step</legend>
+    <label>Operation
+      <select id="step-op">
+        <option value="move">Move one axis</option>
+        <option value="set_valve">Set valve position</option>
+        <option value="home">Home axes</option>
+        <option value="dwell">Wait</option>
+        <option value="log">Log message</option>
+        <option value="checkpoint">Checkpoint</option>
+        <option value="call">Call another procedure</option>
+        <option value="move_multi">Move several axes</option>
+      </select>
+    </label>
+    <div id="step-fields" class="step-fields"></div>
+    <button id="add-step" type="button">Add step</button>
+  </fieldset>
+
+  <h3>Run parameters</h3>
+  <p>Values replace references such as <code>${travel}</code>. Defaults are filled when the procedure is opened.</p>
+  <div id="proc-parameter-fields" class="parameter-fields"></div>
+  <details>
+    <summary>Run parameters as JSON</summary>
+  <textarea id="proc-parameters" class="json-editor compact" spellcheck="false">{}</textarea>
+  </details>
+
+  <details class="advanced-editor">
+    <summary>Advanced JSON editor</summary>
+    <p>Use this for parameter definitions and operations not exposed by the visual builder. Apply changes before saving.</p>
+    <textarea id="proc-detail" class="json-editor" spellcheck="false"></textarea>
+    <button id="apply-json" type="button">Apply JSON changes</button>
+  </details>
+  <pre id="proc-result" aria-live="polite"></pre>
 </section>
 {% endblock %}
 {% block scripts %}

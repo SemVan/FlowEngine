@@ -8,7 +8,7 @@ from typing import TypeVar
 import yaml
 from pydantic import BaseModel, ValidationError
 
-from flowengine.config import REPO_CONFIG_DIR, resolve_config_file
+from flowengine.config import REPO_CONFIG_DIR, resolve_config_file, user_overlay_dir
 from flowengine.errors import ConfigError
 from flowengine.schemas import DeviceMap, ModesConfig, Procedure, RuntimeParams
 
@@ -43,14 +43,14 @@ def load_modes() -> ModesConfig:
 def list_procedures() -> list[Path]:
     """Return every .yaml under repo config/procedures plus user overlay procedures."""
     out: list[Path] = []
-    for base in (
-        REPO_CONFIG_DIR / "procedures",
-        resolve_config_file("procedures").parent / "procedures",
-    ):
+    seen: set[str] = set()
+    # User files shadow shipped procedures with the same filename.
+    for base in (user_overlay_dir() / "procedures", REPO_CONFIG_DIR / "procedures"):
         if base.is_dir():
             for p in sorted(base.glob("*.yaml")):
-                if p not in out:
+                if p.name not in seen:
                     out.append(p)
+                    seen.add(p.name)
     return out
 
 

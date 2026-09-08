@@ -84,3 +84,31 @@ def test_move_requires_to_xor_by():
         Procedure(name="t", steps=[{"op": "move", "axis": "X"}])  # neither
     with pytest.raises(ValidationError):
         Procedure(name="t", steps=[{"op": "move", "axis": "X", "to": 1, "by": 2}])  # both
+
+
+def test_procedure_parameters_are_resolved_and_bounded():
+    procedure = Procedure.model_validate(
+        {
+            "name": "parameterized",
+            "parameters": {"travel": {"type": "number", "minimum": 0.1, "maximum": 10.0}},
+            "steps": [{"op": "move", "axis": "X", "by": "${travel}"}],
+        }
+    )
+    resolved = procedure.resolve({"travel": 2.5})
+    assert resolved.steps[0].by == 2.5  # type: ignore[union-attr]
+    with pytest.raises(ValueError, match="above"):
+        procedure.resolve({"travel": 20})
+
+
+def test_draft_procedure_only_resolves_for_preview_or_single_step():
+    procedure = Procedure(
+        name="draft",
+        draft=True,
+        parameters={"distance": {"type": "number", "default": 1.5}},
+        steps=[{"op": "move", "axis": "X", "by": "${distance}"}],
+    )
+    with pytest.raises(ValueError, match="draft"):
+        procedure.resolve()
+    resolved = procedure.resolve(allow_draft=True)
+    assert resolved.draft is False
+    assert resolved.steps[0].by == 1.5  # type: ignore[union-attr]

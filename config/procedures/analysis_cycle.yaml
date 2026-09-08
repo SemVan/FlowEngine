@@ -1,0 +1,54 @@
+name: analysis_cycle
+description: "DRAFT EXAMPLE: valves 1 and 3 → position 2, valve 2 → position 1; pumps 1 and 2 dispense independently. The example uses sequential moves until concurrent motion is defined."
+version: 1
+draft: true
+parameters:
+  valve_1:
+    type: string
+    default: null
+  valve_2:
+    type: string
+    default: null
+  valve_3:
+    type: string
+    default: null
+  pump_1_axis:
+    type: string
+    default: null
+  pump_2_axis:
+    type: string
+    default: null
+  pump_1_travel:
+    type: number
+    default: null
+  pump_2_travel:
+    type: number
+    default: null
+  pump_1_feedrate:
+    type: number
+    default: null
+    minimum: 0.01
+  pump_2_feedrate:
+    type: number
+    default: null
+    minimum: 0.01
+steps:
+  - op: set_valve
+    name: "${valve_1}"
+    position: B
+  - op: set_valve
+    name: "${valve_3}"
+    position: B
+  - op: set_valve
+    name: "${valve_2}"
+    position: A
+  - op: move
+    axis: "${pump_1_axis}"
+    by: "${pump_1_travel}"
+    feedrate: "${pump_1_feedrate}"
+  - op: move
+    axis: "${pump_2_axis}"
+    by: "${pump_2_travel}"
+    feedrate: "${pump_2_feedrate}"
+  - op: checkpoint
+    name: "analysis delivery complete"

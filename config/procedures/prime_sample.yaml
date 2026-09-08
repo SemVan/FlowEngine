@@ -1,6 +1,19 @@
 name: prime_sample
 description: "Prime the sample line: valve A → push syringe → settle."
 version: 1
+parameters:
+  travel:
+    type: number
+    description: "Syringe travel in configured axis units."
+    default: 30.0
+    minimum: 0.1
+    maximum: 146.2508767
+  feedrate:
+    type: number
+    description: "Syringe feedrate in axis units per minute."
+    default: 300.0
+    minimum: 1.0
+    maximum: 1200.0
 steps:
   - op: home
     axes: [X]
@@ -9,8 +22,8 @@ steps:
     position: A
   - op: move
     axis: X
-    by: 30.0
-    feedrate: 300.0
+    by: "${travel}"
+    feedrate: "${feedrate}"
   - op: dwell
     seconds: 2
   - op: log

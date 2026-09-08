@@ -1,0 +1,40 @@
+name: wash_user
+description: "DRAFT EXAMPLE: all three valves → position 2; this variant drives a pump axis. Make a separate procedure if pressure on/off is selected."
+version: 1
+draft: true
+parameters:
+  valve_1:
+    type: string
+    default: null
+  valve_2:
+    type: string
+    default: null
+  valve_3:
+    type: string
+    default: null
+  wash_axis:
+    type: string
+    default: null
+  wash_travel:
+    type: number
+    default: null
+  wash_feedrate:
+    type: number
+    default: null
+    minimum: 0.01
+steps:
+  - op: set_valve
+    name: "${valve_1}"
+    position: B
+  - op: set_valve
+    name: "${valve_2}"
+    position: B
+  - op: set_valve
+    name: "${valve_3}"
+    position: B
+  - op: move
+    axis: "${wash_axis}"
+    by: "${wash_travel}"
+    feedrate: "${wash_feedrate}"
+  - op: checkpoint
+    name: "wash complete"

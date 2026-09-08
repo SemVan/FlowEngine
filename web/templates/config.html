@@ -1,9 +1,29 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="panel">
-  <h2>Config</h2>
-  <p class="phase-note">Read-only in Phase 1. Save/load from UI lands in Phase 2.</p>
-  <pre id="config-dump">loading...</pre>
+  <h2>Configuration profiles</h2>
+  <p>Profiles are validated before saving. Start FlowEngine with <code>--profile NAME</code> to activate a saved profile.</p>
+  <label>Name <input id="profile-name" value="my_instrument" pattern="[A-Za-z0-9_-]+"></label>
+  <button id="save-profile" type="button">Save current as…</button>
+  <button id="reload-profiles" type="button">Reload list</button>
+  <select id="profile-list"><option>loading…</option></select>
+  <button id="load-profile" type="button">View selected</button>
+  <textarea id="config-editor" class="json-editor" spellcheck="false">loading…</textarea>
+  <pre id="config-result" aria-live="polite"></pre>
+</section>
+
+<section class="panel">
+  <h2>Autosampler rack configurations</h2>
+  <p>The supplied 8×12 rack is a draft. Coordinates and axes must be measured before motion is enabled.</p>
+  <label>Name <input id="rack-name" value="example_8x12" pattern="[A-Za-z0-9_-]+"></label>
+  <button id="save-rack" type="button">Save as…</button>
+  <button id="reload-racks" type="button">Reload list</button>
+  <select id="rack-list"><option>loading…</option></select>
+  <button id="load-rack" type="button">Load selected</button>
+  <button id="plan-rack" type="button">Build plan for selected cells</button>
+  <textarea id="rack-editor" class="json-editor" spellcheck="false"></textarea>
+  <div id="rack-grid" class="rack-grid" aria-label="rack cells"></div>
+  <pre id="rack-result" aria-live="polite"></pre>
 </section>
 {% endblock %}
 {% block scripts %}

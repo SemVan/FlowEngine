@@ -32,6 +32,7 @@ from flowengine.api import (
 )
 from flowengine.api.deps import AppContext
 from flowengine.config import WEB_DIR, AppSettings
+from flowengine.config_store import find_saved, load_yaml
 from flowengine.errors import ConfigError, ControllerError
 from flowengine.events import EventBus
 from flowengine.hardware import CommandQueue, GcodeSender, MotionModel
@@ -39,6 +40,7 @@ from flowengine.hardware.homing import EndstopHoming
 from flowengine.loaders import load_device_map, load_modes, load_runtime
 from flowengine.logging_setup import configure_logging
 from flowengine.procedures.runner import ProcedureRunner
+from flowengine.schemas import ConfigurationProfile
 from flowengine.state import State, StateMachine
 from flowengine.transport import MarlinTransport, MockTransport, Transport, discover_marlin_port
 
@@ -75,12 +77,19 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         try:
-            device_map = load_device_map()
-            runtime = load_runtime()
-            try:
-                modes = load_modes()
-            except ConfigError:
-                modes = None  # modes are optional in Phase 1
+            if settings.profile == "default":
+                device_map = load_device_map()
+                runtime = load_runtime()
+                try:
+                    modes = load_modes()
+                except ConfigError:
+                    modes = None
+            else:
+                profile = load_yaml(find_saved("profiles", settings.profile), ConfigurationProfile)
+                device_map = profile.device_map
+                runtime = profile.runtime
+                modes = profile.modes
+                log.info("loaded configuration profile %s", settings.profile)
         except ConfigError as e:
             log.error("config load failed: %s", e)
             raise

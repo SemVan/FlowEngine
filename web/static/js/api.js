@@ -26,6 +26,25 @@ async function request(path, opts = {}) {
 export const api = {
   state() { return request("/api/state"); },
   config() { return request("/api/config"); },
+  profiles() { return request("/api/config/profiles"); },
+  profile(name) { return request(`/api/config/profiles/${encodeURIComponent(name)}`); },
+  saveProfile(name, profile) {
+    return request(`/api/config/profiles/${encodeURIComponent(name)}`, {
+      method: "PUT", body: JSON.stringify(profile),
+    });
+  },
+  racks() { return request("/api/config/racks"); },
+  rack(name) { return request(`/api/config/racks/${encodeURIComponent(name)}`); },
+  saveRack(name, rack) {
+    return request(`/api/config/racks/${encodeURIComponent(name)}`, {
+      method: "PUT", body: JSON.stringify(rack),
+    });
+  },
+  rackPlan(name, cells) {
+    return request(`/api/config/racks/${encodeURIComponent(name)}/plan`, {
+      method: "POST", body: JSON.stringify(cells),
+    });
+  },
   firmware() { return request("/api/diagnostics/firmware"); },
   endstops() { return request("/api/diagnostics/endstops"); },
   position() { return request("/api/diagnostics/position"); },
@@ -51,7 +70,28 @@ export const api = {
   stop() { return request("/api/stop", { method: "POST" }); },
   procedures() { return request("/api/procedures"); },
   procedure(name) { return request(`/api/procedures/${encodeURIComponent(name)}`); },
-  runProcedure(name) { return request(`/api/procedures/${encodeURIComponent(name)}/run`, { method: "POST" }); },
+  saveProcedure(name, procedure) {
+    return request(`/api/procedures/${encodeURIComponent(name)}`, {
+      method: "PUT", body: JSON.stringify(procedure),
+    });
+  },
+  runProcedure(name, parameters = {}) {
+    return request(`/api/procedures/${encodeURIComponent(name)}/run`, {
+      method: "POST", body: JSON.stringify(parameters),
+    });
+  },
+  previewProcedure(name, parameters = {}) {
+    return request(`/api/procedures/${encodeURIComponent(name)}/preview`, {
+      method: "POST", body: JSON.stringify(parameters),
+    });
+  },
+  runProcedureStep(name, stepNumber, parameters = {}) {
+    return request(`/api/procedures/${encodeURIComponent(name)}/steps/${stepNumber}/run`, {
+      method: "POST",
+      headers: { "Idempotency-Key": uuid() },
+      body: JSON.stringify(parameters),
+    });
+  },
   procedureStatus() { return request("/api/procedures/status"); },
   abortProcedure() { return request("/api/procedures/abort", { method: "POST" }); },
 };
