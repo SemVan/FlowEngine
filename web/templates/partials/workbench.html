@@ -1,0 +1,30 @@
+<section class="panel" id="developer-workbench">
+  <h2>Developer workbench</h2>
+  <pre id="connection-view">Loading connection…</pre>
+  <details><summary>Capabilities and limitations</summary><pre id="capabilities-view"></pre></details>
+  <p>Stop is a serial request, not an emergency stop. After Stop, restart and re-home. Releasing motors invalidates their reference position.</p>
+  <h3>Motion in physical units</h3>
+  <label>Axis <select id="wb-axis">{% for ax in device_map.axes %}<option>{{ ax.marlin_axis }}</option>{% endfor %}</select></label>
+  <label>Relative displacement <input id="wb-by" type="number" step="any" value="1"></label>
+  <label>Displacement units <select id="wb-units"><option value="axis">Axis units (mm/deg)</option><option value="steps">STEP pulses</option></select></label>
+  <label>Speed <input id="wb-speed" type="number" min="0" step="any" value="60"></label>
+  <select id="wb-speed-units" aria-label="Speed units"><option value="axis/min">Axis units/min</option><option value="axis/s">Axis units/s</option><option value="steps/s">STEP pulses/s</option></select>
+  <label>Acceleration (axis units/s², optional) <input id="wb-accel" type="number" min="0" step="any"></label>
+  <button id="wb-jog" type="button">Move selected axis</button>
+  <h3>Motor holding</h3>
+  <button id="wb-release" type="button">Release selected motor</button>
+  <button id="wb-enable" type="button">Enable selected motor</button>
+  <button id="wb-release-all" type="button">Release all motors</button>
+  <label>Running current (RMS mA) <input id="wb-current" type="number" min="1" step="1"></label>
+  <button id="wb-set-current" type="button">Set verified driver current</button>
+  <p>Separate holding-current adjustment is not implemented: driver and firmware support must be established.</p>
+  <h3>Raw G/M-code console</h3>
+  <p>One command per line. Mutating commands require confirmation and invalidate positions. No automatic retry.</p>
+  <form id="console-form"><label>Command <input id="console-command" value="M114" maxlength="120" autocomplete="off" list="console-history"></label>
+    <datalist id="console-history"></datalist><button type="submit">Send</button></form>
+  <h3>Sensors</h3>
+  <button id="wb-sensors" type="button">Read configured sensors</button>
+  <pre id="sensor-view">Not read. Missing source ≠ zero.</pre>
+  <button id="wb-export" type="button">Export session feedback</button>
+  <pre id="wb-result" aria-live="polite"></pre>
+</section>

@@ -1,0 +1,9 @@
+name: pump_volume_example
+description: "Draft: volume dosing requires a confirmed pump calibration and home"
+draft: true
+parameters:
+  pump_name: {type: string, default: sample_pump}
+  volume: {type: number, default: 10, minimum: 0.01}
+  flow: {type: number, default: 10, minimum: 0.01}
+steps:
+  - {op: pump, name: "${pump_name}", volume_ul: "${volume}", flow_ul_min: "${flow}", direction: dispense}

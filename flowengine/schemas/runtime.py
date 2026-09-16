@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class FirmwareExpectation(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
     flavor: Literal["marlin", "klipper"] = "marlin"
     features_required: list[str] = Field(
@@ -19,10 +19,17 @@ class FirmwareExpectation(BaseModel):
         default=False,
         description="Frame commands as N<line> ... *<checksum>. Enable only after probing firmware.",
     )
+    verified_probe_axes: list[str] = Field(
+        default_factory=list,
+        description="Bench-verified G38.2 axes using the firmware probe input; not arbitrary endstops.",
+    )
+    probe_channel: str | None = None
+    probe_target_verified: bool = False
+    verified_current_axes: list[str] = Field(default_factory=list)
 
 
 class TransportConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
     port: str = "/dev/ttyACM0"
     baud: int = 115200
@@ -33,7 +40,7 @@ class TransportConfig(BaseModel):
 class Timeouts(BaseModel):
     """Per-command-class timeouts in seconds."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
     ok_default: float = Field(default=5.0, gt=0)
     move: float = Field(default=30.0, gt=0)
@@ -42,7 +49,7 @@ class Timeouts(BaseModel):
 
 
 class MotionLimits(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
     feedrate_cap: float = Field(default=3000.0, gt=0, description="Hard cap, units/min.")
     accel_cap: float | None = Field(default=None, gt=0)
@@ -60,7 +67,7 @@ class MotionLimits(BaseModel):
 class PressureConfig(BaseModel):
     """How to read pressure. Phase 1 default is `manual`."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
     source: Literal["manual", "mock", "controller", "usb"] = "manual"
     units: str = "kPa"
@@ -69,7 +76,7 @@ class PressureConfig(BaseModel):
 class RuntimeParams(BaseModel):
     """Mutable runtime config. Saved/loaded from `config/runtime.yaml`; editable from UI."""
 
-    model_config = ConfigDict(extra="forbid", frozen=False)
+    model_config = ConfigDict(extra="forbid", frozen=False, allow_inf_nan=False)
 
     firmware: FirmwareExpectation = Field(default_factory=FirmwareExpectation)
     transport: TransportConfig = Field(default_factory=TransportConfig)

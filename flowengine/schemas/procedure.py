@@ -17,7 +17,27 @@ NumberValue = float | ParameterReference
 
 
 class _Step(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def check_numeric_fields(self):
+        for name in (
+            "feedrate",
+            "duration_s",
+            "acceleration",
+            "volume_ul",
+            "flow_ul_min",
+            "search_distance",
+            "backoff",
+            "reference_feedrate",
+        ):
+            value = getattr(self, name, None)
+            if isinstance(value, (int, float)) and value <= 0:
+                raise ValueError(f"{name} must be positive")
+        tolerance = getattr(self, "tolerance_pulses", None)
+        if isinstance(tolerance, (int, float)) and tolerance < 0:
+            raise ValueError("tolerance_pulses must be nonnegative")
+        return self
 
 
 class MoveStep(_Step):
@@ -26,6 +46,9 @@ class MoveStep(_Step):
     to: NumberValue | None = None
     by: NumberValue | None = None
     feedrate: NumberValue | None = None
+    units: Literal["axis", "steps"] = "axis"
+    speed_units: Literal["axis/min", "axis/s", "steps/s"] = "axis/min"
+    acceleration: NumberValue | None = None
 
     @model_validator(mode="after")
     def _check_exactly_one(self) -> MoveStep:
@@ -39,6 +62,79 @@ class MoveMultiStep(_Step):
     axes: dict[str, NumberValue]
     feedrate: NumberValue | None = None
     relative: bool = False
+    duration_s: NumberValue | None = None
+    acceleration: NumberValue | None = None
+
+    @model_validator(mode="after")
+    def valid_axes(self) -> MoveMultiStep:
+        if not self.axes:
+            raise ValueError("move_multi requires nonempty axes")
+        if self.duration_s is not None and self.feedrate is not None:
+            raise ValueError("choose duration_s OR feedrate")
+        return self
+
+
+class PumpStep(_Step):
+    op: Literal["pump"]
+    name: str
+    volume_ul: NumberValue
+    flow_ul_min: NumberValue
+    direction: Literal["dispense", "aspirate"] = "dispense"
+    acceleration: NumberValue | None = None
+
+
+class PumpDose(_Step):
+    volume_ul: NumberValue
+    flow_ul_min: NumberValue
+    direction: Literal["dispense", "aspirate"] = "dispense"
+
+
+class PumpMultiStep(_Step):
+    op: Literal["pump_multi"]
+    pumps: dict[str, PumpDose] = Field(min_length=2)
+    acceleration: NumberValue | None = None
+
+
+class MotorsStep(_Step):
+    op: Literal["motors"]
+    enabled: bool
+    axes: list[str] | None = None
+
+
+class ReadSensorsStep(_Step):
+    op: Literal["read_sensors"]
+
+
+class SeekStep(_Step):
+    op: Literal["seek"]
+    axis: str
+    channel: str
+    by: NumberValue
+    feedrate: NumberValue
+    zero: bool = False
+
+
+class ValveCalibrationStep(_Step):
+    op: Literal["calibrate_valve"]
+    axis: str
+    channel: str
+    search_distance: NumberValue
+    feedrate: NumberValue
+    backoff: NumberValue
+    repeats: int = Field(default=3, ge=1, le=20)
+
+
+class ReferenceTestStep(_Step):
+    op: Literal["test_reference"]
+    axis: str
+    channel: str
+    by: NumberValue
+    feedrate: NumberValue
+    reference_feedrate: NumberValue
+    backoff: NumberValue
+    tolerance_pulses: NumberValue
+    acceleration: NumberValue | None = None
+    repeats: int = Field(default=3, ge=1, le=20)
 
 
 class HomeStep(_Step):
@@ -99,7 +195,7 @@ class CallStep(_Step):
 
 
 class ProcedureParameter(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
     type: Literal["number", "integer", "string", "boolean"]
     description: str = ""
@@ -108,7 +204,9 @@ class ProcedureParameter(BaseModel):
     maximum: float | None = None
 
     def validate_value(self, name: str, value: Any) -> float | int | str | bool:
-        if self.type == "number" and not isinstance(value, (int, float)):
+        if self.type == "number" and (
+            not isinstance(value, (int, float)) or isinstance(value, bool)
+        ):
             raise ValueError(f"parameter {name!r} must be a number")
         if self.type == "integer" and (not isinstance(value, int) or isinstance(value, bool)):
             raise ValueError(f"parameter {name!r} must be an integer")
@@ -134,13 +232,20 @@ Step = Annotated[
     | WaitPressureStep
     | LogStep
     | CheckpointStep
+    | PumpStep
+    | PumpMultiStep
+    | MotorsStep
+    | ReadSensorsStep
+    | SeekStep
+    | ValveCalibrationStep
+    | ReferenceTestStep
     | CallStep,
     Field(discriminator="op"),
 ]
 
 
 class Procedure(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
     name: str = Field(min_length=1)
     description: str = ""

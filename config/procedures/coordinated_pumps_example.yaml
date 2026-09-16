@@ -1,0 +1,8 @@
+name: coordinated_pumps_example
+description: "Draft: calibrated sample/sheath volumes with a shared nominal duration; verify directions and home"
+draft: true
+steps:
+  - op: pump_multi
+    pumps:
+      sample_pump: {volume_ul: 10, flow_ul_min: 10, direction: dispense}
+      sheath_pump: {volume_ul: 50, flow_ul_min: 50, direction: dispense}

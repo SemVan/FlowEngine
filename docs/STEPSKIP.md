@@ -1,72 +1,64 @@
-# Step-skipping test — protocol design (Phase 3)
+# Проверка возврата к опоре
 
-This document describes the planned protocol. The implementation is scaffolded but not delivered in Phase 1; see `flowengine/experiments/stepskip.py`.
+Работающий первый вариант — операция `test_reference` в редакторе процедур.
+Старый API pressure-ramp /api/stepskip/run остаётся недоступным. Это не энкодерный
+тест и не измерение абсолютного числа пропущенных шагов.
 
-## Why
+## Протокол
 
-Steppers under high back-pressure (a clogged or near-full syringe) can lose steps silently. The motor moves, the controller thinks it moved further than it did, and your dispensed volume is wrong. Endstops won't catch this; you need a positive-control test on the bench to characterize the safe operating envelope.
+1. На освобождённом, проверенном probe-входе найти домашнюю опору с низкой скоростью.
+2. Отойти на backoff, проверить освобождение и медленно повторно найти опору.
+   Число импульсов поиска — базовая коррекция.
+3. Для каждого повтора: отойти, выполнить заданное перемещение и обратное движение
+   с выбранной скоростью, затем медленно искать опору.
+4. Сравнить число импульсов повторного поиска с базовой коррекцией.
+5. Отойти от опоры, освободить общий вход и сохранить отчёт.
 
-The flow cytometer's syringe pumps are the highest-risk: a single missed batch of steps over a 1 mL injection changes the measured sample concentration. Knowing the feedrate at which loss begins, at expected back-pressures, lets us cap `feedrate_max` safely.
+Поддержку G38.2 и его остановку по правильному входу проверяют в прошивке и на стенде.
+Нельзя заменять это опросом M119 во время длинного движения с компьютера.
 
-## What the test does
-
-For a single axis (typically a syringe pump), the test runs a parameterized ramp:
-
+```yaml
+- op: test_reference
+  axis: X
+  channel: z_probe
+  by: 5
+  feedrate: 60
+  reference_feedrate: 30
+  backoff: 1
+  tolerance_pulses: 8
+  repeats: 3
 ```
-for each setpoint in ramp:
-    record baseline position (M400; M114)
-    command N steps at the current setpoint
-    wait_idle (M400; M114)
-    record settled position
-    sample pressure (PressureSensor.read())
-    delta = (reported - commanded)
-    if abs(delta) > tolerance:
-        mark setpoint as "step-loss"
-        optionally: stop, or continue to characterize the curve
-```
 
-Setpoint dimension is either **feedrate** (most common) or **load** (back-pressure target, via a downstream valve restriction). For the syringe-pump first pass we ramp feedrate at a fixed back-pressure (open valve or pinch clamp).
+Числа — иллюстрация, не рекомендации для конкретной механики. by направлен ОТ
+домашнего конца. backoff положительный. Ход с отходом должен помещаться в travel.
+Исходный вход должен быть освобождён, остальные устройства не должны держать его.
 
-## Parameters
+## Результат
 
-| Parameter | Meaning | Typical value |
-|---|---|---|
-| `axis` | Marlin axis under test | `E0` / `E1` / `E2` |
-| `setpoint_dim` | What we vary | `feedrate` |
-| `setpoint_range` | [start, stop, step] | e.g. `[100, 1500, 100]` mm/min |
-| `move_per_step` | Commanded distance per setpoint | e.g. 5 mm |
-| `tolerance` | When to declare loss | e.g. 0.05 mm |
-| `back_pressure` | Optional reference; manual entry if no sensor | — |
-| `rest_between_s` | Pause between setpoints | 1 s |
+baseline_step_pulses — базовая коррекция; corrections_step_pulses — повторные
+поиски; errors_step_pulses — разница с базой; suspected_position_error — превышен
+выбранный допуск. Отчёты доступны в статусе процедуры и session feedback.
 
-## Output
+Сначала выбрать допуск по повторяемости низкоскоростной опоры. Затем менять
+скорость или ускорение по одному параметру. Не увеличивать нагрузку автоматически.
 
-1. **CSV** at `~/.local/state/flowengine/stepskip/<timestamp>.csv`:
-   ```
-   setpoint, commanded_mm, reported_mm, delta_mm, pressure, lost
-   100, 5.000, 5.000, 0.000, 12.3, False
-   200, 5.000, 4.998, -0.002, 13.1, False
-   ...
-   1300, 5.000, 4.870, -0.130, 27.4, True
-   ```
+## Что НЕ является измерением пропусков
 
-2. **Markdown summary** with the first-loss setpoint and a chart of `delta_mm` vs `setpoint`.
+M114 и Count сообщают координаты и импульсные счётчики прошивки, а не положение
+ротора. Их сравнение с отправленной командой само по себе не выявляет потерь.
+См. [M114](https://marlinfw.org/docs/gcode/M114.html).
 
-3. **Suggested action**: a one-line recommendation, e.g.
-   > Cap `feedrate_max` for E0 at **1100 mm/min** (one safety margin step below first-loss at 1300).
+Ошибка возврата может быть вызвана пропусками, люфтом, муфтой или концевиком.
+Пропуски противоположных направлений могут взаимно компенсироваться. Успех этого
+теста не доказывает правильность промежуточного положения или дозированного объёма.
 
-## What this test does *not* do
+Если прошивка не выдаёт Count, применяется округлённая координата M114 ×
+настроенные шаги/единицу; этот источник указан в отчёте калибровки крана и имеет
+худшее разрешение. Точность датчика и электроники не выводится из размера счётчика.
 
-- It does not test long-term reliability (do a soak separately).
-- It does not test acceleration limits in isolation (a separate experiment).
-- It does not characterize cross-axis interactions (one axis at a time).
+Для независимой количественной оценки нужны энкодер или внешнее измерение.
+Полный pressure-ramp, CSV, автоматический график безопасной скорости и управление
+нагрузкой пока не реализованы. Старые описания такого протокола были планом,
+а сравнение “M114 фактическое − команда” было неверным предположением.
 
-## When to run
-
-- At commissioning, once mechanical assembly is final.
-- After any mechanical change (new syringe, new tubing geometry, new motor coupling).
-- If procedures start producing unexpected pressure traces.
-
-## Source of pressure
-
-Phase 1 ships `ManualSensor` and `MockSensor`. The real sensor source is TBD — see `docs/HARDWARE.md` → "Pressure sensor source" for the open decision. Until that's resolved, the test can still run with `ManualSensor` (operator types in a pressure reading per setpoint) — slow, but valid.
+См. [COMMISSIONING.md](COMMISSIONING.md) и пример `config/procedures/reference_test_example.yaml`.

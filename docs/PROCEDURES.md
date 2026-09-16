@@ -12,12 +12,12 @@ description: "Prime the sample line"
 version: 1
 steps:
   - op: home
-    axes: [E0]
+    axes: [X]
   - op: set_valve
     name: sample_valve
     position: A
   - op: move
-    axis: E0
+    axis: X
     by: 30.0
     feedrate: 300.0
   - op: dwell
@@ -73,11 +73,38 @@ Supported parameter types are `number`, `integer`, `string`, and `boolean`. A mi
 
 ## Primitive set
 
+Additional executable operations (all examples remain drafts until commissioned):
+
+| Operation | Required fields | Meaning |
+|---|---|---|
+| `pump` | name, volume_ul, flow_ul_min | Calibrated fluid movement; direction dispense/aspirate |
+| `pump_multi` | pumps: mapping from pump name to volume_ul / flow_ul_min / direction | ≥2 calibrated pumps; matching nominal durations |
+| `motors` | enabled | Optional axes; release invalidates their home |
+| `read_sensors` | — | One M105 report mapped through analog_inputs |
+| `seek` | axis, channel, by, feedrate | Verified G38.2 contact search; optional zero |
+| `calibrate_valve` | axis, channel, search_distance, feedrate, backoff | Endpoint spans; repeats=3 |
+| `test_reference` | axis, channel, by, feedrate, reference_feedrate, backoff, tolerance_pulses | Return-reference error; repeats=3 |
+
+`move` also accepts units=axis/steps, speed_units=axis/min, axis/s or steps/s.
+`move`, `move_multi` and `pump` accept acceleration in axis units/s²; it is scoped
+to the movement and restored from the M503 M204 P/R/T report.
+Preview exposes static execution_issues; full execution checks unsupported operations
+and references before starting. Travel and current position are still checked at execution.
+
+`seek`/calibration operations are disabled unless firmware.probe_target_verified,
+verified_probe_axes and probe_channel describe an actually bench-verified mapping.
+These config fields do not modify firmware pins. Home-direction convention also applies
+to zero=true. After a raw command, motor release, Stop or uncertain motion, positions
+may need re-homing. Stop leaves the queue faulted until application restart.
+
+Practical examples are shipped in `config/procedures/` as drafts.
+Hardware caveats: [COMMISSIONING.md](COMMISSIONING.md).
+
 ### `move`
 
 ```yaml
 - op: move
-  axis: E0          # Marlin axis letter (see device_map.yaml)
+  axis: X           # Marlin axis letter (see device_map.yaml)
   to: 25.0          # absolute target (one of `to` / `by`, not both)
   by: 5.0           # OR relative move
   feedrate: 400.0   # optional; defaults to axis.feedrate_default
@@ -85,7 +112,7 @@ Supported parameter types are `number`, `integer`, `string`, and `boolean`. A mi
 
 Soft limits are enforced before the G-code is sent.
 
-### `move_multi` *(accepted as a draft, execution not implemented yet)*
+### `move_multi` (coordinated movement)
 
 ```yaml
 - op: move_multi
@@ -94,7 +121,9 @@ Soft limits are enforced before the G-code is sent.
   relative: false
 ```
 
-This reserves the format for coordinated motion. It can be stored and previewed, but the runner currently refuses to execute it.
+Executes one coordinated G1. Choose feedrate OR duration_s (nominal constant-speed duration,
+excluding acceleration/deceleration). Axes finish together; this is not independent planners.
+Matching axis units, homed axes, component speed limits and non-shared endstop inputs are required.
 
 ### `home`
 

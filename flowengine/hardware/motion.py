@@ -8,6 +8,7 @@ software does, and every motion command goes through here first.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 
 from flowengine.errors import SoftLimitError
@@ -44,6 +45,11 @@ class MotionModel:
             self._homed[a] = True
             self._positions[a] = 0.0
 
+    def invalidate(self, axes: list[str] | None = None) -> None:
+        for axis in axes if axes is not None else self._homed:
+            self._map.axis(axis)
+            self._homed[axis] = False
+
     def update_position(self, positions: dict[str, float]) -> None:
         for k, v in positions.items():
             if k in self._positions:
@@ -58,11 +64,16 @@ class MotionModel:
         target = self._positions[axis] + delta
         return self._validate(axis, target, feedrate, cfg=cfg)
 
+    def max_feedrate(self, axis: str) -> float:
+        return min(self._map.axis(axis).feedrate_max, self._feedrate_cap)
+
     def plan_absolute(self, axis: str, target: float, feedrate: float | None) -> AxisPosition:
         cfg = self._map.axis(axis)
         return self._validate(axis, target, feedrate, cfg=cfg)
 
     def _validate(self, axis: str, target: float, feedrate: float | None, cfg) -> AxisPosition:
+        if not math.isfinite(target) or (feedrate is not None and not math.isfinite(feedrate)):
+            raise SoftLimitError("position and feedrate must be finite")
         if not self._homed[axis]:
             raise SoftLimitError(f"axis {axis} not homed; refuse to move")
         # Convention: home_direction `min` → axis range is [0, travel]; `max` → [-travel, 0].

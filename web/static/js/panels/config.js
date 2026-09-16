@@ -1,4 +1,5 @@
 import { api } from "../api.js";
+import { renderHardwareForms, applyHardwareForms } from "./hardware-config.js";
 
 const profileEditor = document.getElementById("config-editor");
 const profileResult = document.getElementById("config-result");
@@ -33,11 +34,13 @@ api.config().then((config) => {
     rack: null,
   };
   profileEditor.value = JSON.stringify(profile, null, 2);
+  renderHardwareForms();
 }).catch((error) => show(profileResult, `Load failed: ${error.message}`));
 
 document.getElementById("save-profile")?.addEventListener("click", async () => {
   try {
     const name = document.getElementById("profile-name").value.trim();
+    applyHardwareForms();
     const value = JSON.parse(profileEditor.value);
     value.name = name;
     show(profileResult, await api.saveProfile(name, value));
@@ -45,8 +48,17 @@ document.getElementById("save-profile")?.addEventListener("click", async () => {
   } catch (error) { show(profileResult, `Save failed: ${error.message}`); }
 });
 
+document.getElementById("export-profile")?.addEventListener("click", () => {
+  try {
+    applyHardwareForms();
+    const value = JSON.parse(profileEditor.value); value.name = document.getElementById("profile-name").value.trim();
+    const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a"); link.href = url; link.download = `${value.name.replace(/[^A-Za-z0-9_-]/g, "_")}-profile.json`; link.click(); URL.revokeObjectURL(url);
+  } catch(e) { show(profileResult, e.message); }
+});
+
 document.getElementById("load-profile")?.addEventListener("click", async () => {
-  try { profileEditor.value = JSON.stringify(await api.profile(profileList.value), null, 2); }
+  try { profileEditor.value = JSON.stringify(await api.profile(profileList.value), null, 2); renderHardwareForms(); }
   catch (error) { show(profileResult, `Load failed: ${error.message}`); }
 });
 

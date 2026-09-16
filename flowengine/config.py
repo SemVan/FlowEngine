@@ -74,7 +74,13 @@ class AppSettings:
 
 
 def user_overlay_dir() -> Path:
-    p = Path(user_config_dir("flowengine", appauthor=False))
+    if os.environ.get("FLOWENGINE_CONFIG_DIR"):
+        p = Path(os.environ["FLOWENGINE_CONFIG_DIR"]).expanduser()
+    elif os.environ.get("XDG_CONFIG_HOME"):
+        # Honour explicit isolation on macOS too (platformdirs otherwise ignores XDG).
+        p = Path(os.environ["XDG_CONFIG_HOME"]) / "flowengine"
+    else:
+        p = Path(user_config_dir("flowengine", appauthor=False))
     p.mkdir(parents=True, exist_ok=True)
     return p
 

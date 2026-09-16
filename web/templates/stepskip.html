@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="panel">
-  <h2>Step-skip test <span class="phase-tag">Phase 3</span></h2>
+  <h2>Return-to-reference test</h2>
   <p class="phase-note">
-    This is where the pressure-vs-feedrate ramp will run. See
-    <a href="https://github.com/" target="_blank" rel="noopener">docs/STEPSKIP.md</a>
-    for the protocol design.
+    In the <a href="/procedures">procedure editor</a>, add “Check return-to-reference error”.
+    It requires bench-verified firmware-stopped probe search. Compare the slow baseline
+    with repeated round trips at the selected speed. Results are reference errors,
+    not encoder measurements or proof of skipped steps. The old pressure-ramp API remains unavailable.
   </p>
 </section>
 {% endblock %}

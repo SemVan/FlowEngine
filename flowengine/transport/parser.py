@@ -112,7 +112,7 @@ Response = (
 _RESEND_RE = re.compile(r"^\s*Resend\s*:?\s*N?(\d+)", re.IGNORECASE)
 _RESEND_ALT_RE = re.compile(r"Last Line:\s*N?(\d+)", re.IGNORECASE)
 _POS_TOKEN_RE = re.compile(r"([A-Z]):\s*(-?\d+(?:\.\d+)?)")
-_ENDSTOP_RE = re.compile(r"^\s*([a-z]_(?:min|max)|_(?:min|max))\s*:\s*(\S+)", re.IGNORECASE)
+_ENDSTOP_RE = re.compile(r"^\s*([a-z][a-z0-9_]*)\s*:\s*(open|triggered|true|false|0|1)\s*$", re.IGNORECASE)
 _CAP_RE = re.compile(r"Cap:([A-Z0-9_]+):(\d)")
 
 
@@ -120,7 +120,7 @@ def _parse_endstop_block(raw: str) -> dict[str, bool]:
     """`M119` returns one endstop per line, e.g. `x_min: open` / `y_max: TRIGGERED`."""
     out: dict[str, bool] = {}
     for line in raw.splitlines():
-        m = re.match(r"\s*([a-z]_(?:min|max))\s*:\s*(\S+)", line, re.IGNORECASE)
+        m = _ENDSTOP_RE.match(line)
         if m:
             out[m.group(1).lower()] = m.group(2).strip().lower() in {"triggered", "true", "1"}
     return out
@@ -171,7 +171,8 @@ def parse_line(line: str) -> Response:
 
     # M114 position response: "X:10.00 Y:0.00 Z:0.00 E:0.00 Count X:80 Y:0 Z:0"
     if _POS_TOKEN_RE.search(stripped) and " Count " not in stripped[:3]:
-        tokens = dict(_POS_TOKEN_RE.findall(stripped))
+        # Count is motor pulse state, not coordinates in axis units.
+        tokens = dict(_POS_TOKEN_RE.findall(stripped.split(" Count ", 1)[0]))
         if tokens:
             return PositionResponse(positions={k: float(v) for k, v in tokens.items()}, raw=line)
 

@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from flowengine.errors import (
     ControllerError,
@@ -65,6 +67,12 @@ class CommandQueue:
         self._send_lock = asyncio.Lock()
         self._aborted = asyncio.Event()
         self._depth = 0
+        self.trace: deque[dict[str, str]] = deque(maxlen=1000)
+
+    def _record(self, direction: str, line: str) -> None:
+        self.trace.append(
+            {"timestamp": datetime.now(UTC).isoformat(), "direction": direction, "line": line}
+        )
 
     @property
     def depth(self) -> int:
@@ -78,8 +86,18 @@ class CommandQueue:
         self._depth += 1
         try:
             async with self._send_lock:
+                if self._aborted.is_set():
+                    raise ControllerError("queue is faulted; reconnect before sending commands")
+                self._record("TX", gcode)
                 await self._transport.send_line(gcode)
                 return await self._await_ok(gcode, timeout)
+        except (ControllerError, TransportClosed, TransportTimeout, TransportProtocolError):
+            # A late ACK must never be mistaken for the ACK of the next command.
+            self._aborted.set()
+            raise
+        except asyncio.CancelledError:
+            self._aborted.set()
+            raise
         finally:
             self._depth -= 1
 
@@ -87,9 +105,10 @@ class CommandQueue:
         """Out-of-band quickstop: send `M410` immediately and discard the in-flight wait."""
         self._aborted.set()
         try:
+            self._record("TX", "M410 (out-of-band stop request)")
             await self._transport.send_line("M410")
         except TransportClosed:
-            # If we're disconnected anyway, that's fine — the device will stop on its own.
+            # Loss of USB is NOT evidence that physical motion stopped.
             log.warning("abort attempted while transport closed")
 
     def reset_abort(self) -> None:
@@ -112,6 +131,7 @@ class CommandQueue:
             except TransportTimeout:
                 raise
             result.raw.append(line)
+            self._record("RX", line)
             resp = parse_line(line)
             match resp:
                 case OkResponse():

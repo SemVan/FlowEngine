@@ -1,0 +1,5 @@
+name: reference_test_example
+description: "Draft: low-speed reference vs round-trip error; NOT encoder step-loss measurement"
+draft: true
+steps:
+  - {op: test_reference, axis: X, channel: probe, by: 5, feedrate: 60, reference_feedrate: 30, backoff: 1, tolerance_pulses: 8, repeats: 3}

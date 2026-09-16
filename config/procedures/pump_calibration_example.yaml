@@ -1,0 +1,10 @@
+name: pump_calibration_example
+description: "Draft: collect liquid after known STEP pulses; measure and enter results in Config"
+draft: true
+parameters:
+  axis: {type: string, default: X}
+  pulses: {type: number, default: 80, minimum: 1}
+  pulses_per_second: {type: number, default: 80, minimum: 1}
+steps:
+  - {op: move, axis: "${axis}", by: "${pulses}", units: steps, feedrate: "${pulses_per_second}", speed_units: steps/s}
+  - {op: log, message: "Measure collected liquid; enter pulses and µL/mass in Config pump calibration. No automatic measurement."}

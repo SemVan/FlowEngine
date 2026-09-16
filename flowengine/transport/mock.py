@@ -26,7 +26,7 @@ from flowengine.transport.base import Transport
 
 log = logging.getLogger(__name__)
 
-_AXIS_TOKEN = re.compile(r"([XYZABCUVWIJKE]\d*)([-+]?\d+(?:\.\d+)?)")
+_AXIS_TOKEN = re.compile(r"([XYZABCUVWIJK]|E\d*)([-+]?\d+(?:\.\d+)?)")
 _HOME_AXIS_TOKEN = re.compile(r"\b([XYZABCUVWIJKE]\d*)\b")
 _LINE_PREFIX = re.compile(r"^\s*N(\d+)\s+(.*?)\*\d+\s*$")
 
@@ -40,6 +40,8 @@ class MockTransport(Transport):
         latency_s: float = 0.005,
         error_every_n: int = 0,
         disconnect_after: int | None = None,
+        probe_strokes: dict[str, float] | None = None,
+        probe_channel: str = "probe",
     ) -> None:
         self._latency = latency_s
         self._error_every_n = error_every_n
@@ -52,6 +54,17 @@ class MockTransport(Transport):
         self._homed: dict[str, bool] = {}
         self._absolute = True
         self._injected_errors_remaining = 0
+        self.commands: list[str] = []
+        self.probe_strokes = probe_strokes or {}
+        self.probe_channel = probe_channel
+        self.mechanical = {a: s/2 for a,s in self.probe_strokes.items()}
+        self.step_loss_fraction = 0.0
+        self.step_loss_direction: int | None = None
+        self.probe_stuck: bool | None = None
+        self.driver_enabled: dict[str, bool] = {}
+        self._steps_per_unit: dict[str, float] = defaultdict(lambda: 80.0)
+        self._counts: dict[str, int] = defaultdict(int)
+        self._acceleration = {"P": 3000.0, "R": 3000.0, "T": 3000.0}
 
     async def open(self) -> None:
         self._closed = False
@@ -91,6 +104,7 @@ class MockTransport(Transport):
                 return
 
             n, payload = self._strip_framing(line)
+            self.commands.append(payload)
 
             if self._injected_errors_remaining > 0:
                 self._injected_errors_remaining -= 1
@@ -140,6 +154,10 @@ class MockTransport(Transport):
                 await self._inbox.put(
                     f"{axis}_min: {'TRIGGERED' if self._homed.get(axis.upper(), False) else 'open'}"
                 )
+            if self.probe_strokes:
+                triggered = self.probe_stuck if self.probe_stuck is not None else any(
+                    self.mechanical[a] <= 0 or self.mechanical[a] >= stroke for a,stroke in self.probe_strokes.items())
+                await self._inbox.put(f"{self.probe_channel}: {'TRIGGERED' if triggered else 'open'}")
             await self._inbox.put("ok")
             return
         if p.startswith("M114"):
@@ -147,7 +165,44 @@ class MockTransport(Transport):
             y = self._positions.get("Y", 0.0)
             z = self._positions.get("Z", 0.0)
             e = self._positions.get("E0", 0.0)
-            await self._inbox.put(f"X:{x:.2f} Y:{y:.2f} Z:{z:.2f} E:{e:.2f}")
+            extra = " ".join(f"{a}:{v:.4f}" for a,v in self._positions.items() if a not in {"X", "Y", "Z", "E0"} and len(a) == 1)
+            counts = " ".join(f"{a}:{v}" for a,v in self._counts.items() if len(a) == 1)
+            await self._inbox.put(f"X:{x:.4f} Y:{y:.4f} Z:{z:.4f} E:{e:.4f} {extra} Count {counts}")
+            await self._inbox.put("ok")
+            return
+        if p.startswith("M105"):
+            await self._inbox.put("ok T:25.0 /0.0 T0:25.0 /0.0 B:24.5 /0.0")
+            return
+        if p.startswith("M503"):
+            await self._inbox.put("echo: M204 " + " ".join(f"{k}{v:.3f}" for k,v in self._acceleration.items()))
+            await self._inbox.put("ok")
+            return
+        if p.startswith("M204"):
+            for k,v in re.findall(r"([PRT])([0-9.]+)", p):
+                self._acceleration[k] = float(v)
+            await self._inbox.put("ok")
+            return
+        if p.startswith(("M17", "M18", "M84")):
+            axes = _HOME_AXIS_TOKEN.findall(p[3:]) or list(self._positions) or ["X", "Y", "Z"]
+            for a in axes:
+                self.driver_enabled[a] = p.startswith("M17")
+            await self._inbox.put("ok")
+            return
+        if p.startswith("G38.2"):
+            tokens = _AXIS_TOKEN.findall(p)
+            for a,v in tokens:
+                if a not in self.probe_strokes:
+                    await self._inbox.put("Error:unsupported mock probe axis")
+                    return
+                delta = float(v) - self._positions[a]
+                contact = 0.0 if delta < 0 else self.probe_strokes[a]
+                needed = contact - self.mechanical[a]
+                if self.probe_stuck is False or abs(needed) > abs(delta):
+                    await self._inbox.put("Error:Failed to reach probe")
+                    return
+                self._positions[a] += needed
+                self._counts[a] += round(needed*self._steps_per_unit[a])
+                self.mechanical[a] = contact
             await self._inbox.put("ok")
             return
         if (
@@ -163,7 +218,8 @@ class MockTransport(Transport):
             await self._inbox.put("ok")
             return
         if p.startswith("M92"):
-            # steps/unit set; just ack
+            for a,v in _AXIS_TOKEN.findall(p):
+                self._steps_per_unit[a] = float(v)
             await self._inbox.put("ok")
             return
         if p.startswith("G90"):
@@ -195,10 +251,16 @@ class MockTransport(Transport):
         if p.startswith(("G0", "G1")):
             for axis, val in _AXIS_TOKEN.findall(payload):
                 v = float(val)
+                old = self._positions.get(axis, 0.0)
                 if self._absolute:
                     self._positions[axis] = v
                 else:
                     self._positions[axis] = self._positions.get(axis, 0.0) + v
+                delta = self._positions[axis]-old
+                self._counts[axis] += round(delta*self._steps_per_unit[axis])
+                if axis in self.mechanical:
+                    loss = self.step_loss_fraction if self.step_loss_direction is None or (delta > 0) == (self.step_loss_direction > 0) else 0
+                    self.mechanical[axis] += delta * (1-loss)
             # Tiny random jitter so tests can't depend on exact micro-timing.
             await asyncio.sleep(self._latency * (1 + random.random()))
             await self._inbox.put("ok")

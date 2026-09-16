@@ -6,16 +6,30 @@ function uuid() {
   return "id-" + Math.random().toString(16).slice(2) + Date.now().toString(16);
 }
 
+function errorMessage(body, fallback) {
+  const detail = body && body.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((item) => {
+      const location = Array.isArray(item.loc) ? item.loc.join(".") : "request";
+      return `${location}: ${item.msg || JSON.stringify(item)}`;
+    }).join("; ");
+  }
+  if (detail && typeof detail === "object") return JSON.stringify(detail);
+  return fallback;
+}
+
 async function request(path, opts = {}) {
+  const { headers = {}, ...requestOptions } = opts;
   const res = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
-    ...opts,
+    ...requestOptions,
+    headers: { "Content-Type": "application/json", ...headers },
   });
   const text = await res.text();
   let body;
   try { body = text ? JSON.parse(text) : null; } catch { body = text; }
   if (!res.ok) {
-    const err = new Error((body && body.detail) || res.statusText);
+    const err = new Error(errorMessage(body, res.statusText));
     err.status = res.status;
     err.body = body;
     throw err;
@@ -24,6 +38,11 @@ async function request(path, opts = {}) {
 }
 
 export const api = {
+  workbench(action, body) {
+    return request(`/api/workbench/${action}`, body === undefined ? {} : {
+      method: "POST", body: JSON.stringify(body),
+    });
+  },
   state() { return request("/api/state"); },
   config() { return request("/api/config"); },
   profiles() { return request("/api/config/profiles"); },

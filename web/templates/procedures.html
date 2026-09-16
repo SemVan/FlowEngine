@@ -15,6 +15,7 @@
   </div>
   <button id="new-proc" type="button">New</button>
   <button id="save-proc" type="button">Validate &amp; save</button>
+  <button id="export-proc" type="button">Export procedure JSON</button>
   <button id="preview-proc" type="button">Save &amp; preview</button>
   <button id="run-proc" type="button">Run complete procedure</button>
 
@@ -32,6 +33,13 @@
         <option value="checkpoint">Checkpoint</option>
         <option value="call">Call another procedure</option>
         <option value="move_multi">Move several axes</option>
+        <option value="pump">Pump volume</option>
+        <option value="pump_multi">Coordinated pump volumes / flows</option>
+        <option value="motors">Enable / release motors</option>
+        <option value="read_sensors">Read sensors</option>
+        <option value="seek">Verified probe contact search</option>
+        <option value="calibrate_valve">Measure valve endpoint distance</option>
+        <option value="test_reference">Check return-to-reference error</option>
       </select>
     </label>
     <div id="step-fields" class="step-fields"></div>

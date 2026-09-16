@@ -222,6 +222,7 @@ def test_procedure_runs_end_to_end(client):
         "step": 2,
         "step_path": "home_all step 2",
         "error": None,
+        "results": [],
     }
 
 

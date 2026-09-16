@@ -14,6 +14,14 @@ export function mountJog(store, tbody, panelRoot) {
       const row = t.closest("tr");
       const step = Number(row.querySelector(`[data-step="${axis}"]`).value);
       const feedrate = Number(row.querySelector(`[data-feedrate="${axis}"]`).value);
+      if (!Number.isFinite(step) || step <= 0) {
+        alert(`Jog refused (${axis}): step must be a positive number written with a decimal point.`);
+        return;
+      }
+      if (!Number.isFinite(feedrate) || feedrate <= 0) {
+        alert(`Jog refused (${axis}): feedrate must be a positive number written with a decimal point.`);
+        return;
+      }
       try {
         await api.jog(axis, dir * step, feedrate);
       } catch (e) {
@@ -73,7 +81,7 @@ export function mountJog(store, tbody, panelRoot) {
     if (homeAll) homeAll.disabled = !enabled;
     const interlock = document.getElementById("motion-interlock");
     if (interlock) {
-      const link = state.port ? `${state.port} @ ${state.baud}` : "no serial port";
+      const link = state.transport === "mock" ? "simulator (no hardware)" : state.port ? `${state.port} @ ${state.baud}` : "no serial port";
       interlock.textContent = state.motionEnabled
         ? `Motion enabled · ${link}`
         : `Diagnostics only · motion locked · ${link}`;

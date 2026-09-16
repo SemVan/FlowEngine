@@ -27,7 +27,8 @@ async def state(ctx: Context):
         transport=ctx.transport.name,
         port=getattr(ctx.transport, "port", None),
         baud=getattr(ctx.transport, "baud", None),
-        motion_enabled=ctx.runtime.motion.enabled,
+        motion_enabled=ctx.runtime.motion.enabled or ctx.transport.name == "mock",
+        profile=getattr(ctx, "profile_name", "default"),
     )
 
 

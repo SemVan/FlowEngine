@@ -40,6 +40,7 @@ class StateResponse(BaseModel):
     port: str | None = None
     baud: int | None = None
     motion_enabled: bool
+    profile: str = "default"
 
 
 class FirmwareInfo(BaseModel):

@@ -25,7 +25,8 @@ function show(value) {
 }
 
 function optionList(values, selected = "") {
-  return values.map((value) => `<option value="${value}" ${value === selected ? "selected" : ""}>${value}</option>`).join("");
+  const escape = v => String(v).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  return values.map((value) => `<option value="${escape(value)}" ${value === selected ? "selected" : ""}>${escape(value)}</option>`).join("");
 }
 
 function syncModelFromHeader() {
@@ -195,7 +196,10 @@ function renderStepFields() {
   if (stepOp.value === "move") {
     stepFields.innerHTML = `<label>Axis<select id="step-axis">${optionList(axes)}</select></label>
       <label>Movement<select id="step-move-kind"><option value="by">Relative (by)</option><option value="to">Absolute (to)</option></select></label>
-      ${inputField("Value or \${parameter}", "step-value")}${inputField("Feedrate (optional)", "step-feedrate")}`;
+      ${inputField("Value or \${parameter}", "step-value")}${inputField("Feedrate (optional)", "step-feedrate")}
+      <label>Displacement units<select id="step-units"><option value="axis">mm/deg</option><option value="steps">STEP pulses</option></select></label>
+      <label>Speed units<select id="step-speed-units"><option value="axis/min">axis units/min</option><option value="axis/s">axis units/s</option><option value="steps/s">STEP pulses/s</option></select></label>
+      ${inputField("Acceleration (optional, axis units/s²)", "step-accel")}`;
   } else if (stepOp.value === "set_valve") {
     stepFields.innerHTML = `<label>Valve<select id="step-valve">${optionList(valves)}</select></label>
       <label>Position<select id="step-position"><option value="A">A / position 1</option><option value="B">B / position 2</option></select></label>`;
@@ -216,7 +220,47 @@ function renderStepFields() {
   } else if (stepOp.value === "move_multi") {
     stepFields.innerHTML = `${inputField("Axes JSON", "step-axes-json", "{&quot;X&quot;: 1, &quot;Y&quot;: 2}")}
       ${inputField("Feedrate (optional)", "step-feedrate")}
+      ${inputField("Nominal duration s (instead of feedrate)", "step-duration")}
+      ${inputField("Acceleration (optional)", "step-accel")}
       <label class="inline-check"><input id="step-relative" type="checkbox"> Relative</label>`;
+  } else if (stepOp.value === "pump") {
+    stepFields.innerHTML = `<label>Pump<select id="step-pump">${optionList((hardware.device_map.pumps || []).map(p => p.name))}</select></label>
+      ${inputField("Volume µL", "step-volume")}${inputField("Flow µL/min", "step-flow")}
+      <label>Direction<select id="step-direction"><option value="dispense">Dispense</option><option value="aspirate">Aspirate</option></select></label>
+      ${inputField("Acceleration (optional)", "step-accel")}`;
+  } else if (stepOp.value === "motors") {
+    stepFields.innerHTML = `${inputField("Axes, comma separated (empty = all)", "step-axes")}
+      <label>Action<select id="step-enabled"><option value="false">Release (reference lost)</option><option value="true">Enable</option></select></label>`;
+  } else if (stepOp.value === "pump_multi") {
+    stepFields.replaceChildren();
+    for (const pump of hardware.device_map.pumps || []) {
+      const row = document.createElement("fieldset"); row.dataset.pumpDose = pump.name;
+      const legend = document.createElement("legend"); legend.textContent = pump.name; row.append(legend);
+      for (const [key, title, type] of [["selected", "Include", "checkbox"], ["volume_ul", "Volume µL", "text"], ["flow_ul_min", "Flow µL/min", "text"]]) {
+        const label = document.createElement("label"); label.textContent = title;
+        const input = document.createElement("input"); input.type = type; input.dataset.doseField = key; label.append(input); row.append(label);
+      }
+      const select = document.createElement("select"); select.dataset.doseField = "direction";
+      for (const name of ["dispense", "aspirate"]) { const option = document.createElement("option"); option.value = name; option.textContent = name; select.append(option); }
+      row.append(select); stepFields.append(row);
+    }
+    const help = document.createElement("small"); help.textContent = "Select ≥2 calibrated pumps. volume/flow must give the same nominal duration; acceleration changes actual duration."; stepFields.append(help);
+  } else if (stepOp.value === "seek") {
+    stepFields.innerHTML = `<label>Axis<select id="step-axis">${optionList(axes)}</select></label>
+      ${inputField("Verified probe channel", "step-channel")}${inputField("Maximum relative search (axis units)", "step-value")}
+      ${inputField("Feedrate (axis units/min)", "step-feedrate")}
+      <label><input type="checkbox" id="step-zero"> Establish zero at contact</label><small>Requires bench-verified G38.2 support; input must be released.</small>`;
+  } else if (stepOp.value === "read_sensors") {
+    stepFields.textContent = "Read configured sources once and add report to event log.";
+  } else if (["calibrate_valve", "test_reference"].includes(stepOp.value)) {
+    stepFields.innerHTML = `<label>Axis<select id="step-axis">${optionList(axes)}</select></label>
+      ${inputField("Verified shared probe channel", "step-channel")}
+      ${inputField(stepOp.value === "calibrate_valve" ? "Maximum search distance" : "Round trip displacement (signed away from home)", "step-value")}
+      ${inputField("Feedrate (axis units/min)", "step-feedrate")}
+      ${inputField("Backoff (positive axis units)", "step-backoff")}
+      ${inputField("Repeats (1–20)", "step-repeats", "3")}
+      ${stepOp.value === "test_reference" ? inputField("Slow reference feedrate", "step-reference-feedrate") + inputField("Tolerance STEP pulses", "step-tolerance") + inputField("Trial acceleration (optional)", "step-accel") : ""}
+      <small>Firmware-stopped contact search required. Initial input must be released. Reports do not automatically change configuration.</small>`;
   }
 }
 
@@ -258,6 +302,10 @@ function buildStep() {
     step[kind] = numberOrReference(document.getElementById("step-value").value);
     const feedrate = numberOrReference(document.getElementById("step-feedrate").value, false);
     if (feedrate !== undefined) step.feedrate = feedrate;
+    step.units = document.getElementById("step-units").value;
+    step.speed_units = document.getElementById("step-speed-units").value;
+    const acceleration = numberOrReference(document.getElementById("step-accel").value, false);
+    if (acceleration !== undefined) step.acceleration = acceleration;
     return step;
   }
   if (stepOp.value === "set_valve") return { op: "set_valve", name: document.getElementById("step-valve").value, position: document.getElementById("step-position").value };
@@ -277,6 +325,51 @@ function buildStep() {
     const step = { op: "move_multi", axes: JSON.parse(document.getElementById("step-axes-json").value), relative: document.getElementById("step-relative").checked };
     const feedrate = numberOrReference(document.getElementById("step-feedrate").value, false);
     if (feedrate !== undefined) step.feedrate = feedrate;
+    const duration = numberOrReference(document.getElementById("step-duration").value, false);
+    if (duration !== undefined) step.duration_s = duration;
+    const acceleration = numberOrReference(document.getElementById("step-accel").value, false);
+    if (acceleration !== undefined) step.acceleration = acceleration;
+    return step;
+  }
+  if (stepOp.value === "pump") {
+    const step = { op: "pump", name: document.getElementById("step-pump").value,
+      volume_ul: numberOrReference(document.getElementById("step-volume").value),
+      flow_ul_min: numberOrReference(document.getElementById("step-flow").value),
+      direction: document.getElementById("step-direction").value };
+    const acceleration = numberOrReference(document.getElementById("step-accel").value, false);
+    if (acceleration !== undefined) step.acceleration = acceleration;
+    return step;
+  }
+  if (stepOp.value === "motors") {
+    const axes = document.getElementById("step-axes").value.split(",").map(s => s.trim()).filter(Boolean);
+    return { op: "motors", enabled: document.getElementById("step-enabled").value === "true", axes: axes.length ? axes : null };
+  }
+  if (stepOp.value === "pump_multi") {
+    const pumps = {};
+    for (const row of stepFields.querySelectorAll("[data-pump-dose]")) {
+      if (!row.querySelector('[data-dose-field="selected"]').checked) continue;
+      pumps[row.dataset.pumpDose] = { volume_ul: numberOrReference(row.querySelector('[data-dose-field="volume_ul"]').value),
+        flow_ul_min: numberOrReference(row.querySelector('[data-dose-field="flow_ul_min"]').value),
+        direction: row.querySelector('[data-dose-field="direction"]').value };
+    }
+    return { op: "pump_multi", pumps };
+  }
+  if (stepOp.value === "read_sensors") return { op: "read_sensors" };
+  if (stepOp.value === "seek") return { op: "seek", axis: document.getElementById("step-axis").value,
+    channel: document.getElementById("step-channel").value, by: numberOrReference(document.getElementById("step-value").value),
+    feedrate: numberOrReference(document.getElementById("step-feedrate").value), zero: document.getElementById("step-zero").checked };
+  if (["calibrate_valve", "test_reference"].includes(stepOp.value)) {
+    const step = { op: stepOp.value, axis: document.getElementById("step-axis").value,
+      channel: document.getElementById("step-channel").value, feedrate: numberOrReference(document.getElementById("step-feedrate").value),
+      backoff: numberOrReference(document.getElementById("step-backoff").value), repeats: Number(document.getElementById("step-repeats").value) };
+    if (step.op === "calibrate_valve") step.search_distance = numberOrReference(document.getElementById("step-value").value);
+    else { step.by = numberOrReference(document.getElementById("step-value").value);
+      step.reference_feedrate = numberOrReference(document.getElementById("step-reference-feedrate").value);
+      step.tolerance_pulses = numberOrReference(document.getElementById("step-tolerance").value); }
+    if (step.op === "test_reference") {
+      const acceleration = numberOrReference(document.getElementById("step-accel").value, false);
+      if (acceleration !== undefined) step.acceleration = acceleration;
+    }
     return step;
   }
   throw new Error(`Unsupported operation ${stepOp.value}`);
@@ -327,6 +420,12 @@ stepsList?.addEventListener("click", async (event) => {
 document.getElementById("new-proc")?.addEventListener("click", () => {
   setProcedure(emptyProcedure());
   show("New draft. Add steps, save it, then commission individual steps if needed.");
+});
+
+document.getElementById("export-proc")?.addEventListener("click", () => {
+  syncModelFromHeader();
+  const url = URL.createObjectURL(new Blob([JSON.stringify(procedure, null, 2)], { type: "application/json" }));
+  const link = document.createElement("a"); link.href = url; link.download = `${procedure.name.replace(/[^A-Za-z0-9_-]/g, "_")}.json`; link.click(); URL.revokeObjectURL(url);
 });
 
 document.getElementById("add-step")?.addEventListener("click", () => {

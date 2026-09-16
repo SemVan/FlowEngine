@@ -53,11 +53,15 @@ def _wrap_errors(fn):  # type: ignore[no-untyped-def]
             raise HTTPException(status_code=502, detail=f"controller: {e}") from e
         except TransportError as e:
             raise HTTPException(status_code=503, detail=f"transport: {e}") from e
+        except (ValueError, KeyError) as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
 
     return inner
 
 
 def _require_motion_enabled(ctx: AppContext) -> None:
+    if ctx.runner.status["running"]:
+        raise StateError("procedure is running; manual commands are blocked")
     if ctx.transport.name != "mock" and not ctx.runtime.motion.enabled:
         raise StateError(
             "motion interlock is disabled; verify the firmware axis map and limits, "
@@ -77,11 +81,16 @@ async def jog(
         return cached
     _require_motion_enabled(ctx)
     ctx.state.require(State.CONNECTED_IDLE)
+    ctx.motion.plan_relative(body.axis, body.delta, body.feedrate)
     await ctx.state.transition(State.MOVING, detail=f"jog {body.axis} {body.delta:+.3f}")
     try:
         await ctx.sender.jog(body.axis, body.delta, body.feedrate)
         positions = await ctx.sender.wait_idle()
-    finally:
+    except Exception:
+        ctx.motion.invalidate([body.axis])
+        await ctx.state.transition(State.ERRORED, detail="jog failed; position unverified")
+        raise
+    else:
         await ctx.state.transition(State.CONNECTED_IDLE, detail="jog complete")
     audit("jog", axis=body.axis, delta=body.delta, feedrate=body.feedrate)
     result = {"ok": True, "positions": positions}
@@ -101,11 +110,16 @@ async def move(
         return cached
     _require_motion_enabled(ctx)
     ctx.state.require(State.CONNECTED_IDLE)
+    ctx.motion.plan_absolute(body.axis, body.target, body.feedrate)
     await ctx.state.transition(State.MOVING, detail=f"move {body.axis}→{body.target:.3f}")
     try:
         await ctx.sender.move_to(body.axis, body.target, body.feedrate)
         positions = await ctx.sender.wait_idle()
-    finally:
+    except Exception:
+        ctx.motion.invalidate([body.axis])
+        await ctx.state.transition(State.ERRORED, detail="move failed; position unverified")
+        raise
+    else:
         await ctx.state.transition(State.CONNECTED_IDLE, detail="move complete")
     audit("move", axis=body.axis, target=body.target, feedrate=body.feedrate)
     result = {"ok": True, "positions": positions}
@@ -117,11 +131,15 @@ async def move(
 @_wrap_errors
 async def home(body: HomeRequest, ctx: AppContext = Depends(get_ctx)):
     _require_motion_enabled(ctx)
-    ctx.state.require(State.CONNECTED_IDLE, State.ERRORED)
+    ctx.state.require(State.CONNECTED_IDLE)
     await ctx.state.transition(State.HOMING, detail=f"home {body.axes or 'all'}")
     try:
         await ctx.sender.home(body.axes)
-    finally:
+    except Exception:
+        ctx.motion.invalidate(body.axes)
+        await ctx.state.transition(State.ERRORED, detail="home failed; position unverified")
+        raise
+    else:
         await ctx.state.transition(State.CONNECTED_IDLE, detail="homed")
     audit("home", axes=body.axes or "all")
     return {"ok": True, "homed": ctx.motion.homed}
@@ -130,9 +148,10 @@ async def home(body: HomeRequest, ctx: AppContext = Depends(get_ctx)):
 @router.post("/stop")
 @_wrap_errors
 async def stop(ctx: AppContext = Depends(get_ctx)):
-    await ctx.state.transition(State.ABORTING, detail="operator abort")
-    await ctx.queue.abort()
-    ctx.queue.reset_abort()
-    await ctx.state.transition(State.CONNECTED_IDLE, detail="aborted")
+    await ctx.runner.abort()
+    await ctx.sender.abort()
+    await ctx.state.transition(
+        State.ERRORED, detail="stop requested; physical stop unverified; restart and re-home"
+    )
     audit("stop")
     return {"ok": True}

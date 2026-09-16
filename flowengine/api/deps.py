@@ -32,6 +32,7 @@ class AppContext:
     state: StateMachine
     events: EventBus
     runner: ProcedureRunner
+    profile_name: str = "default"
 
 
 def get_ctx(request: Request) -> AppContext:

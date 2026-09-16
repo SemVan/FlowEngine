@@ -1,0 +1,8 @@
+name: shared_home_example
+description: "Draft: ONLY for X/Y bench-verified on the SAME firmware probe; not ordinary x_min remapping"
+draft: true
+steps:
+  - {op: seek, axis: X, channel: probe, by: -10, feedrate: 30, zero: true}
+  - {op: move, axis: X, by: 1, feedrate: 30}
+  - {op: seek, axis: Y, channel: probe, by: -10, feedrate: 30, zero: true}
+  - {op: move, axis: Y, by: 1, feedrate: 30}

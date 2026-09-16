@@ -31,6 +31,7 @@ from flowengine.api import (
     ws_router,
 )
 from flowengine.api.deps import AppContext
+from flowengine.api.router_workbench import router as workbench_router
 from flowengine.config import WEB_DIR, AppSettings
 from flowengine.config_store import find_saved, load_yaml
 from flowengine.errors import ConfigError, ControllerError
@@ -100,7 +101,9 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         queue = CommandQueue(transport, default_timeout_s=runtime.timeouts.ok_default)
         motion = MotionModel(device_map, feedrate_cap=runtime.motion.feedrate_cap)
         homing = EndstopHoming(device_map, timeout_s=runtime.timeouts.homing)
-        sender = GcodeSender(queue, motion, device_map, homing, runtime.timeouts)
+        sender = GcodeSender(queue, motion, device_map, homing, runtime.timeouts,
+                             runtime.firmware, runtime.motion.accel_cap)
+        app.state.profile_name = settings.profile
         state = StateMachine()
         events = EventBus()
         runner = ProcedureRunner(sender, device_map, state, events)
@@ -135,6 +138,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             state=state,
             events=events,
             runner=runner,
+            profile_name=settings.profile,
         )
         forwarder = asyncio.create_task(_forward_state_to_ws(state, events))
 
@@ -154,6 +158,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     app.include_router(modes_router)
     app.include_router(stepskip_router)
     app.include_router(ws_router)
+    app.include_router(workbench_router)
 
     # Static + page routes
     app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")

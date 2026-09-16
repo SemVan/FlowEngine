@@ -1,0 +1,5 @@
+name: valve_calibration_example
+description: "Draft: both valve endpoints must stop G38 on one verified probe input"
+draft: true
+steps:
+  - {op: calibrate_valve, axis: A, channel: probe, search_distance: 10, feedrate: 30, backoff: 1, repeats: 3}

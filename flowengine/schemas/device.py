@@ -35,7 +35,7 @@ class AxisConfig(BaseModel):
     distinguish which side fired, so soft limits in software are mandatory.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
     marlin_axis: MarlinAxis
     name: str = Field(min_length=1)
@@ -55,6 +55,7 @@ class AxisConfig(BaseModel):
     )
     endstop_inverted: bool = False
     notes: str = ""
+    driver_current_max_ma: int | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def _check_caps(self) -> AxisConfig:
@@ -73,7 +74,7 @@ class ValveConfig(BaseModel):
     position model — wired-OR endstops can't tell us which side fired.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
     name: str = Field(min_length=1)
     axis: MarlinAxis
@@ -85,7 +86,7 @@ class ValveConfig(BaseModel):
 class PumpConfig(BaseModel):
     """A pump bound to one axis. `volume_per_unit` lets us speak in µL or mL in the UI."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
     name: str = Field(min_length=1)
     axis: MarlinAxis
@@ -98,12 +99,37 @@ class PumpConfig(BaseModel):
         default=None, gt=0, description="Nominal syringe capacity if known."
     )
     has_encoder: bool = False
+    dispense_direction: Literal[-1, 1] = 1
+    calibrated: bool = False
+    calibration_notes: str = ""
+
+
+class EndstopInput(BaseModel):
+    """Logical switches sharing one firmware input; NOT a firmware pin remapping."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+    channel: str = Field(pattern=r"^[a-zA-Z0-9_]+$")
+    axes: list[MarlinAxis] = Field(min_length=1)
+    active_high: bool = True
+    notes: str = ""
+
+
+class AnalogInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+    name: str = Field(min_length=1)
+    source: str = Field(pattern=r"^(T\d*|B|C|ADC\d+)$")
+    quantity: Literal["temperature", "analog"] = "temperature"
+    units: str = "°C"
+    scale: float = 1.0
+    offset: float = 0.0
+    poll_hz: float = Field(default=1.0, gt=0, le=10)
+    notes: str = ""
 
 
 class AutosamplerConfig(BaseModel):
     """The XYZ capillary positioner. Each axis is also listed in `axes`."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
     name: str = "autosampler"
     x_axis: MarlinAxis
@@ -118,13 +144,15 @@ class DeviceMap(BaseModel):
     """Top-level device map. The single source of truth for which physical thing
     is on which controller axis."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
     instrument_id: str = Field(min_length=1, description="Free-form identifier of this instrument.")
     axes: list[AxisConfig]
     valves: list[ValveConfig] = Field(default_factory=list)
     pumps: list[PumpConfig] = Field(default_factory=list)
     autosampler: AutosamplerConfig | None = None
+    endstop_inputs: list[EndstopInput] = Field(default_factory=list)
+    analog_inputs: list[AnalogInput] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _check_unique_axes(self) -> DeviceMap:
@@ -134,6 +162,18 @@ class DeviceMap(BaseModel):
                 raise ValueError(f"axis {a.marlin_axis} declared twice")
             seen.add(a.marlin_axis)
         axis_set = seen
+        for group in self.endstop_inputs:
+            if len(set(group.axes)) != len(group.axes) or not set(group.axes) <= axis_set:
+                raise ValueError("endstop input axes must be unique known axes")
+        for items, field in (
+            (self.endstop_inputs, "channel"),
+            (self.analog_inputs, "name"),
+            (self.pumps, "name"),
+            (self.valves, "name"),
+        ):
+            values = [getattr(item, field) for item in items]
+            if len(set(values)) != len(values):
+                raise ValueError(f"duplicate {field} in device map")
         for v in self.valves:
             if v.axis not in axis_set:
                 raise ValueError(f"valve {v.name!r} references unknown axis {v.axis}")

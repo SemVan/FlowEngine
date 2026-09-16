@@ -8,7 +8,7 @@ Protocol (sketched in docs/STEPSKIP.md):
        command N steps at the setpoint
        wait_idle + M114
        record pressure (PressureSensor.read())
-       compare commanded vs actual position; flag step loss if delta > tolerance
+       compare external reference/encoder measurements (NOT M114 coordinates)
 3. Emit CSV (setpoint, commanded_steps, actual_steps, pressure, ts) and a
    markdown summary identifying the first setpoint where loss occurred.
 """
@@ -19,5 +19,5 @@ from __future__ import annotations
 class StepSkipTest:
     def __init__(self, *args: object, **kwargs: object) -> None:
         raise NotImplementedError(
-            "Step-skip test is Phase 3. See docs/STEPSKIP.md for the protocol and parameters."
+            "Use test_reference in the procedure editor for reference-return error. M114 cannot detect rotor step loss."
         )

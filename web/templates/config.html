@@ -5,9 +5,23 @@
   <p>Profiles are validated before saving. Start FlowEngine with <code>--profile NAME</code> to activate a saved profile.</p>
   <label>Name <input id="profile-name" value="my_instrument" pattern="[A-Za-z0-9_-]+"></label>
   <button id="save-profile" type="button">Save current as…</button>
+  <button id="export-profile" type="button">Export edited profile JSON</button>
   <button id="reload-profiles" type="button">Reload list</button>
   <select id="profile-list"><option>loading…</option></select>
   <button id="load-profile" type="button">View selected</button>
+  <p>Editing does not change live hardware. Save a profile, then restart with that profile. Unverified values must not enable motion.</p>
+  <button id="config-render-forms" type="button">Load forms from JSON</button>
+  <button id="config-apply-forms" type="button">Apply forms to JSON</button>
+  <div id="hardware-forms"></div>
+  <fieldset><legend>Pump calibration from measured liquid</legend>
+    <label>Pump <select id="calibration-pump"></select></label>
+    <p>Run a known number of STEP pulses, measure collected liquid. Use repeated measurements at the same speed and load.</p>
+    <div id="calibration-measurements"></div>
+    <button id="calibration-add" type="button">Add measurement</button>
+    <button id="calibration-calculate" type="button">Calculate (no movement)</button>
+    <button id="calibration-apply" type="button" disabled>Confirm coefficient in edited profile</button>
+    <pre id="calibration-result"></pre>
+  </fieldset>
   <textarea id="config-editor" class="json-editor" spellcheck="false">loading…</textarea>
   <pre id="config-result" aria-live="polite"></pre>
 </section>

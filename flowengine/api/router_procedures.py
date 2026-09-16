@@ -16,6 +16,7 @@ from flowengine.config_store import save_yaml
 from flowengine.errors import ConfigError, FlowEngineError
 from flowengine.loaders import list_procedures, load_procedure
 from flowengine.procedures import expand_procedure
+from flowengine.procedures.preflight import execution_issues
 from flowengine.schemas import CallStep, Procedure
 
 log = logging.getLogger(__name__)
@@ -85,6 +86,7 @@ async def save(name: str, procedure: Procedure):
 @router.post("/{name}/preview")
 async def preview(
     name: str,
+    ctx: Context,
     parameters: RunParameters = None,
 ):
     """Resolve a saved procedure without sending anything to the controller."""
@@ -105,6 +107,8 @@ async def preview(
             step.model_dump(mode="json", exclude_none=True) for step in expanded.procedure.steps
         ],
         "step_paths": expanded.step_paths,
+        "execution_issues": execution_issues(expanded.procedure, ctx.device_map, ctx.runtime),
+        "warning": "Static preview sends no commands; positions, firmware settings and wiring still require verification.",
     }
 
 
@@ -132,6 +136,9 @@ async def run_step(
                 allow_draft=True,
             )
             paths = [f"{name} step {step_number} → {path}" for path in expanded.step_paths]
+            issues = execution_issues(expanded.procedure, ctx.device_map, ctx.runtime)
+            if issues:
+                raise ValueError("; ".join(issues))
             await ctx.runner.run_selected(
                 name,
                 step_number,
@@ -139,6 +146,11 @@ async def run_step(
                 paths,
             )
         else:
+            issues = execution_issues(
+                Procedure(name=name, steps=[step]), ctx.device_map, ctx.runtime
+            )
+            if issues:
+                raise ValueError("; ".join(issues))
             await ctx.runner.run_one(name, step_number, step)
     except (FlowEngineError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -161,6 +173,9 @@ async def run(
     try:
         source = _load_named(name)
         expanded = expand_procedure(source, _load_named, parameters)
+        issues = execution_issues(expanded.procedure, ctx.device_map, ctx.runtime)
+        if issues:
+            raise ValueError("; ".join(issues))
         ctx.runner.start(expanded.procedure, expanded.step_paths)
     except (FlowEngineError, ValueError) as e:
         raise HTTPException(status_code=409, detail=str(e)) from e

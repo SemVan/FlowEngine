@@ -77,6 +77,8 @@ limits, and endstop polarity.
 | `docs/HARDWARE.md` | Wiring conventions, bring-up checklist, TODOs |
 | `docs/GCODE_PROTOCOL.md` | Which M-codes we use, response handling, resend protocol |
 | `docs/PROCEDURES.md` | DSL reference for `config/procedures/*.yaml` |
+| `docs/COMMISSIONING.md` | Feature limitations, firmware dependencies and bench checklist |
+| `docs/TEST_REPORT.md` | Verification performed for the developer-workbench changes |
 | `docs/ROADMAP.md` | Phases 1 / 2 / 3 and what each adds |
 | `docs/STEPSKIP.md` | Phase 3 step-skipping test design |
 
@@ -96,6 +98,10 @@ limits, and endstop polarity.
 - Saved configuration profiles and editable 8×12 autosampler rack geometry.
 - A reconstructed `X/Y/A/B/C/U` device map and matching example procedures.
 - Automated tests covering the parser, queue, limits, state, WebSocket, and mock stack.
+- Developer console, connection viewer, motor enable/release and session TX/RX export.
+- STEP-pulse / physical-unit motion, confirmed pump volume calibration, scoped acceleration.
+- Coordinated multi-axis G1 and capability-gated probe calibration/reference-return procedures.
+- Editable shared endstop and analog input configuration; one-shot sensor reports.
 
 Mode switching, live fluidics visualization, pressure feedback, variable loops,
 and multi-controller support are not implemented yet. The Fluidics diagram is a

@@ -6,6 +6,7 @@ import { api } from "./api.js";
 import { mountJog } from "./panels/jog.js";
 import { mountStatusBadge } from "./panels/status.js";
 import { mountLog } from "./panels/log.js";
+import "./panels/workbench.js";
 
 const store = createStore({
   controllerState: "unknown",
@@ -43,6 +44,7 @@ api.state().then((s) => {
     positions: s.positions,
     queueDepth: s.queue_depth,
     motionEnabled: s.motion_enabled,
+    transport: s.transport,
     port: s.port,
     baud: s.baud,
   });

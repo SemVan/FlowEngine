@@ -1,0 +1,6 @@
+name: coordinated_motion_example
+description: "Draft: X and Y move together, 1:2 displacement ratio; verify both mechanisms and home first"
+draft: true
+steps:
+  - {op: move_multi, axes: {X: 1, Y: 2}, relative: true, duration_s: 10}
+  - {op: read_sensors}
