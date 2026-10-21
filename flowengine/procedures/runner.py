@@ -25,6 +25,7 @@ from flowengine.schemas import (
     WaitPressureStep,
 )
 from flowengine.schemas.procedure import (
+    HomeValveStep,
     MotorsStep,
     PumpMultiStep,
     PumpStep,
@@ -216,16 +217,18 @@ class ProcedureRunner:
                     await self._sender.jog(step.axis, value, speed)
                 await self._sender.wait_idle()
             await self._state.transition(State.CONNECTED_IDLE, detail="procedure move complete")
+        elif isinstance(step, HomeValveStep):
+            await self._state.transition(State.HOMING, detail=f"valve Home {step.name}")
+            await self._sender.home_valve(step.name)
+            await self._state.transition(State.CONNECTED_IDLE, detail="valve Home complete")
         elif isinstance(step, SetValveStep):
             valve = next((item for item in self._map.valves if item.name == step.name), None)
             if valve is None:
                 raise ProcedureError(f"unknown valve {step.name!r}")
-            target = valve.position_a if step.position == "A" else valve.position_b
             await self._state.transition(
                 State.MOVING, detail=f"valve {step.name} → {step.position}"
             )
-            await self._sender.move_to(valve.axis, target)
-            await self._sender.wait_idle()
+            await self._sender.set_valve(step.name, step.position)
             await self._state.transition(State.CONNECTED_IDLE, detail="valve move complete")
         elif isinstance(step, DwellStep):
             await asyncio.sleep(cast(float, step.seconds))

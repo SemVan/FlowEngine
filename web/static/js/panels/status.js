@@ -13,6 +13,8 @@ export function mountStatusBadge(store) {
     else if (["homing", "moving", "aborting"].includes(state.controllerState)) klass = "dot dot-busy";
     else if (state.controllerState === "errored") klass = "dot dot-disconnected";
     dot.className = klass;
-    label.textContent = state.controllerState + (state.controllerDetail ? ` — ${state.controllerDetail}` : "");
+    const names = {connected_idle:'Готов к работе',disconnected:'Нет подключения',homing:'Поиск исходной позиции',moving:'Выполняется движение',aborting:'Остановка',errored:'Ошибка'};
+    label.textContent = state.wsConnected ? (names[state.controllerState] || 'Подключение…') : 'Нет связи';
+    label.title = state.controllerDetail || '';
   });
 }

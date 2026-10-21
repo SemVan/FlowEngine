@@ -27,13 +27,80 @@ class DeviceKind(StrEnum):
     AUTOSAMPLER_AXIS = "autosampler_axis"
 
 
-class AxisConfig(BaseModel):
-    """One controller axis.
+class EndstopContactObservation(BaseModel):
 
-    `endstop_channels_shared` documents that two physical switches (e.g. min+max
-    on a syringe) are wired-OR onto a single input. The controller cannot
-    distinguish which side fired, so soft limits in software are mandatory.
-    """
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+    position: float
+    approach_direction: Literal[-1, 1]
+    step_count: int | None = None
+
+
+class AxisCalibration(BaseModel):
+    """калибровка X/Y по двум реальным концевикам; общий сигнал различаем по направлению"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+    channel: Literal["x_min", "y_min"]
+    motor: EndstopContactObservation
+    far: EndstopContactObservation
+    positive_toward_motor: bool
+    travel: float = Field(gt=0)
+    travel_steps: float = Field(gt=0)
+    seek_feedrate: float = Field(
+        default=1200.0,
+        gt=0,
+        description="Fast commissioning/home seek feedrate in axis units per minute.",
+    )
+    latch_feedrate: float = Field(
+        default=120.0,
+        gt=0,
+        description="Slow repeat-touch feedrate used to latch an endstop precisely.",
+    )
+    backoff_mm: float = Field(
+        default=2.0,
+        gt=0,
+        description="Distance to clear a contacted switch before the slow repeat touch.",
+    )
+    home_side: Literal["motor", "far"] = Field(
+        default="motor",
+        description="Physical edge used as the absolute reference during Home.",
+    )
+    recorded_at: str
+    measurement_source: Literal["marlin_count", "m114_x_steps_per_unit"]
+    source: Literal["parallel_endstops"] = "parallel_endstops"
+
+    @model_validator(mode="after")
+    def consistent_contacts(self):
+        if self.latch_feedrate > self.seek_feedrate:
+            raise ValueError("latch feedrate must not exceed seek feedrate")
+        motor_direction = 1 if self.positive_toward_motor else -1
+        if self.motor.approach_direction != motor_direction or self.far.approach_direction != -motor_direction:
+            raise ValueError("contact approach directions must oppose and match the physical labels")
+        span = abs(self.motor.position - self.far.position)
+        if span <= 0 or abs(span - self.travel) > max(0.02, span * 0.002):
+            raise ValueError("calibrated travel must match the observed physical endstop span")
+        return self
+
+    @property
+    def motor_coordinate(self) -> float:
+        """координата моторного микрика; начало и конец хода задаём как 0 и travel"""
+        return self.travel if self.positive_toward_motor else 0.0
+
+    @property
+    def far_coordinate(self) -> float:
+        return 0.0 if self.positive_toward_motor else self.travel
+
+    @property
+    def home_coordinate(self) -> float:
+        return self.motor_coordinate if self.home_side == "motor" else self.far_coordinate
+
+    @property
+    def home_approach_direction(self) -> int:
+        contact = self.motor if self.home_side == "motor" else self.far
+        return contact.approach_direction
+
+
+class AxisConfig(BaseModel):
+    """ось контроллера; сторону общего концевика определяем по направлению"""
 
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
@@ -42,7 +109,7 @@ class AxisConfig(BaseModel):
     kind: DeviceKind
     steps_per_unit: float = Field(gt=0, description="steps/mm or steps/deg")
     units: Literal["mm", "deg"] = "mm"
-    travel: float = Field(gt=0, description="Total mechanical travel in `units`.")
+    travel: float | None = Field(default=None, gt=0, description="Declared mechanical travel for axes without X/Y endstop calibration.")
     home_direction: HomeDirection
     homing_strategy: HomingStrategyName = "endstop"
     feedrate_default: float = Field(gt=0, description="Default feedrate, units/min.")
@@ -56,9 +123,30 @@ class AxisConfig(BaseModel):
     endstop_inverted: bool = False
     notes: str = ""
     driver_current_max_ma: int | None = Field(default=None, gt=0)
+    axis_calibration: AxisCalibration | None = None
+
+    @property
+    def mechanical_travel(self) -> float:
+        if self.axis_calibration is not None:
+            return self.axis_calibration.travel
+        if self.travel is None:
+            raise ValueError(f"axis {self.marlin_axis} is not physically calibrated")
+        return self.travel
 
     @model_validator(mode="after")
     def _check_caps(self) -> AxisConfig:
+        if self.axis_calibration is not None:
+            if self.marlin_axis not in {"X", "Y"} or self.kind != DeviceKind.SYRINGE_PUMP or self.units != "mm":
+                raise ValueError("axis calibration supports syringe axes X/Y in mm")
+            if self.axis_calibration.channel != f"{self.marlin_axis.lower()}_min":
+                raise ValueError("axis calibration channel must match its axis")
+            if self.travel is not None:
+                raise ValueError("calibrated X/Y travel lives only in axis_calibration; remove legacy travel")
+        elif self.marlin_axis in {"X", "Y"} and self.kind == DeviceKind.SYRINGE_PUMP and self.endstop_channels_shared:
+            if self.travel is not None:
+                raise ValueError("uncalibrated X/Y with parallel endstops must not carry a guessed travel")
+        elif self.travel is None:
+            raise ValueError("axes without X/Y parallel-endstop calibration require declared travel")
         if self.feedrate_default > self.feedrate_max:
             raise ValueError(
                 f"feedrate_default ({self.feedrate_default}) exceeds feedrate_max ({self.feedrate_max})"
@@ -81,6 +169,20 @@ class ValveConfig(BaseModel):
     position_a: float
     position_b: float
     home_position: Literal["A", "B"] = "A"
+    direction_toward_home: Literal[-1, 1] | None = None
+    home_seek_speed: float = Field(default=120.0, gt=0)
+    home_latch_speed: float = Field(default=30.0, gt=0)
+    backoff: float = Field(default=0.5, gt=0)
+    pull_off: float = Field(default=0.5, gt=0)
+    home_timeout_s: float = Field(default=30.0, gt=0, le=120)
+    calibrated: bool = False
+
+
+class SharedValveEndstop(BaseModel):
+    """общий вход микриков кранов; имя задаётся явно"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    channel: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_]+$")
 
 
 class PumpConfig(BaseModel):
@@ -149,6 +251,7 @@ class DeviceMap(BaseModel):
     instrument_id: str = Field(min_length=1, description="Free-form identifier of this instrument.")
     axes: list[AxisConfig]
     valves: list[ValveConfig] = Field(default_factory=list)
+    shared_valve_endstop: SharedValveEndstop = Field(default_factory=SharedValveEndstop)
     pumps: list[PumpConfig] = Field(default_factory=list)
     autosampler: AutosamplerConfig | None = None
     endstop_inputs: list[EndstopInput] = Field(default_factory=list)
@@ -177,6 +280,12 @@ class DeviceMap(BaseModel):
         for v in self.valves:
             if v.axis not in axis_set:
                 raise ValueError(f"valve {v.name!r} references unknown axis {v.axis}")
+            direction = v.direction_toward_home or (-1 if self.axis(v.axis).home_direction == "min" else 1)
+            if v.calibrated and (v.position_a * direction >= 0 or v.position_b * direction >= 0
+                                 or abs(v.position_a - v.position_b) < 0.001):
+                raise ValueError("calibrated valve A/B must be distinct HOME-relative positions away from HOME")
+        if len({v.axis for v in self.valves}) != len(self.valves):
+            raise ValueError("each valve must have its own motor axis")
         for p in self.pumps:
             if p.axis not in axis_set:
                 raise ValueError(f"pump {p.name!r} references unknown axis {p.axis}")

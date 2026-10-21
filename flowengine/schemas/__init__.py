@@ -12,6 +12,7 @@ from flowengine.schemas.api import (
 from flowengine.schemas.configuration import ConfigurationProfile, RackCellOverride, RackConfig
 from flowengine.schemas.device import (
     AutosamplerConfig,
+    AxisCalibration,
     AxisConfig,
     DeviceKind,
     DeviceMap,
@@ -54,6 +55,7 @@ from flowengine.schemas.telemetry import (
 
 __all__ = [
     "AutosamplerConfig",
+    "AxisCalibration",
     "AxisConfig",
     "CallStep",
     "CheckpointStep",

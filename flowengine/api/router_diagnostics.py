@@ -17,11 +17,30 @@ Context = Annotated[AppContext, Depends(get_ctx)]
 @router.get("/state", response_model=StateResponse)
 async def state(ctx: Context):
     firmware = ctx.runtime.firmware.flavor
+    homed = ctx.motion.homed
+    calibrated = {
+        axis.marlin_axis: axis.axis_calibration is not None
+        for axis in ctx.device_map.axes
+    }
+    reference_status = {
+        axis: (
+            "referenced"
+            if homed.get(axis, False)
+            else "calibrated_unreferenced"
+            if calibrated.get(axis, False)
+            else "uncalibrated"
+        )
+        for axis in calibrated
+    }
     return StateResponse(
         state=ctx.state.state.value,  # type: ignore[arg-type]
         detail=ctx.state.detail,
         positions=ctx.motion.positions,
-        homed=ctx.motion.homed,
+        homed=homed,
+        calibrated=calibrated,
+        reference_status=reference_status,
+        reference_counts=ctx.sender.reference_counts,
+        reference_sides=ctx.sender.reference_sides,
         queue_depth=ctx.queue.depth,
         firmware=firmware,
         transport=ctx.transport.name,

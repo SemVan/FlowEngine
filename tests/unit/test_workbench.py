@@ -33,6 +33,7 @@ def dm():
                 feedrate_default=60,
                 feedrate_max=600,
                 accel_max=100,
+                endstop_channels_shared=False,
             )
             for a in ["X", "Y"]
         ],

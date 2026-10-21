@@ -11,6 +11,7 @@ from pathlib import Path
 
 from flowengine.errors import ConfigError, ProcedureError
 from flowengine.loaders import load_procedure
+from flowengine.schemas.procedure import HomeValveStep
 from flowengine.schemas import (
     DeviceMap,
     HomeStep,
@@ -39,7 +40,7 @@ def lint(proc: Procedure, dm: DeviceMap) -> list[str]:
                 for axis in step.axes:
                     if axis not in known_axes:
                         issues.append(f"step {i}: unknown axis {axis!r}")
-        elif isinstance(step, SetValveStep):
+        elif isinstance(step, (SetValveStep, HomeValveStep)):
             if step.name not in known_valves:
                 issues.append(f"step {i}: unknown valve {step.name!r}")
     return issues

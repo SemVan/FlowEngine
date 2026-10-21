@@ -1,0 +1,13 @@
+FlowEngine Personal v9.1 — profile compatibility / browser apply fix
+
+- Legacy X/Y profiles are migrated on load where the physical endstop data is sufficient.
+- Obsolete guessed safe-range/manual_setup fields no longer make a profile unreadable.
+- X/Y travel:null is preserved by the Config form; blank physical travel is no longer converted to 0.
+- X/Y physical travel is read-only in the generic hardware form and remains owned by axis_calibration.
+- Save + Apply and Apply selected profile work in ordinary browser/BAT mode, not only START_PERSONAL.vbs.
+- Applying a profile rebuilds the transport/queue and intentionally loses X/Y reference; run Home afterwards.
+- START_FLOWENGINE_REAL.bat and START_FLOWENGINE_MOCK.bat now use ./personal-data like the desktop wrapper.
+- Plain BAT launches restore the remembered active profile from personal-data/desktop.json when valid.
+- WebSocket state forwarding follows the live motion/sender objects after reconnect/profile apply.
+
+Regression suite: 118 passed.

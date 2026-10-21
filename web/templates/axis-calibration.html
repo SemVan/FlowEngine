@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .axis-calibration { max-width:950px; margin:0 auto; }
+  .axis-calibration .page-heading h2 { margin-bottom:8px; }
+  .axis-calibration p { line-height:1.6; }
+  .axis-calibration .hint { color:var(--muted); }
+  .axis-calibration .drive-toolbar { display:flex; flex-wrap:wrap; align-items:end; gap:16px; }
+  .axis-calibration .axis-tabs { display:flex; gap:10px; margin:14px 0 18px; }
+  .axis-calibration .axis-tab { min-width:120px; font-size:18px; font-weight:700; }
+  .axis-calibration .axis-tab.is-active { background:#234858; border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent); }
+  .axis-calibration .drive-toolbar label { display:grid; gap:7px; }
+  .axis-calibration .drive-confirm { display:flex; gap:10px; align-items:flex-start; margin:18px 0; }
+  .axis-calibration .drive-confirm input { margin-top:4px; flex-shrink:0; }
+  .axis-calibration .drive-status { display:flex; flex-wrap:wrap; gap:12px 24px; padding:16px 18px; background:#191e25; border:1px solid var(--border); border-radius:9px; }
+  .axis-calibration .drive-status span { display:grid; gap:5px; color:var(--muted); font-size:12px; }
+  .axis-calibration .drive-status strong { color:var(--fg); font-size:17px; font-weight:600; }
+  .axis-calibration .drive-status strong.pressed { color:#f6bf86; }
+  .axis-calibration .hold-buttons { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:22px 0 12px; }
+  .axis-calibration .hold-button { min-height:112px; display:grid; place-content:center; gap:8px; touch-action:none; user-select:none; -webkit-user-select:none; }
+  .axis-calibration .hold-button b { font-size:26px; font-weight:600; }
+  .axis-calibration .hold-button span { color:#b8c8dc; font-size:13px; }
+  .axis-calibration .hold-button.is-held { background:#234858; border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent); }
+  .axis-calibration .drive-message { min-height:30px; color:#97dcc2; white-space:pre-wrap; }
+  .axis-calibration .drive-message.error { color:#f1a3ac; }
+  .axis-calibration .edge-grid,.axis-calibration .commissioning-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:18px 0; }
+  .axis-calibration .edge-card,.axis-calibration .commissioning-card { padding:16px; border:1px solid var(--border); border-radius:9px; background:#1b2027; }
+  .axis-calibration .edge-card h3 { margin:0 0 8px; font-size:16px; }
+  .axis-calibration .edge-card p { min-height:24px; margin:8px 0 14px; color:var(--muted); }
+  .axis-calibration .drive-save { display:flex; flex-wrap:wrap; align-items:end; gap:14px; }
+  .axis-calibration .drive-save label { display:grid; gap:7px; flex:1 1 260px; }
+  .axis-calibration .commissioning-note { padding:14px 16px; margin:12px 0 18px; border:1px solid #35546a; border-radius:9px; background:#182631; }
+  .axis-calibration .commissioning-card strong { display:block; margin-bottom:6px; }
+  .axis-calibration .commissioning-card span { color:var(--muted); }
+  .axis-calibration .contact-prompt { padding:16px; margin:14px 0; border:1px solid #5b6d7d; border-radius:9px; background:#202833; }
+  .axis-calibration .contact-prompt strong { display:block; margin-bottom:6px; }
+  .axis-calibration .edge-card button { width:100%; min-height:46px; }
+
+  .axis-calibration .auto-actions { display:flex; flex-wrap:wrap; gap:10px; margin:14px 0; }
+  .axis-calibration .auto-status { padding:14px 16px; border:1px solid var(--border); border-radius:9px; background:#191e25; white-space:pre-wrap; min-height:52px; }
+  .axis-calibration .auto-status.error { border-color:#7a3940; color:#f1a3ac; }
+  @media(max-width:750px) { .axis-calibration .hold-buttons,.axis-calibration .edge-grid,.axis-calibration .commissioning-grid { grid-template-columns:1fr; } }
+</style>
+<section class="axis-calibration">
+  <div class="page-heading">
+    <h2>Калибровка X / Y по физическим концевикам</h2>
+    <p>Для каждой оси найдите оба физических края, назовите «у мотора / от мотора». FlowEngine сохранит направление знаков и измерит полный ход между концевиками. Между X и Y можно переключаться кнопками X/Y в любой момент, когда движение остановлено — черновики обеих осей сохраняются в текущем сеансе.</p>
+    <div class="commissioning-note"><strong>Единственная геометрическая граница X/Y — физические концевики.</strong> Старые ручные диапазоны удалены. Калибровка доступна при <code>motion.enabled=false</code>; обычное движение остаётся заблокировано до дальнейшего Home/Reference.</div>
+  </div>
+
+  <section class="panel">
+    <h2>Автоматическая калибровка</h2>
+    <p>Направления X/Y уже берутся из сохранённой ручной калибровки. FlowEngine сам найдёт край у мотора, затем край от мотора, сделает точный повторный подход на каждом краю, пересчитает физический ход и Marlin Count, сохранит текущий профиль и в конце выполнит Home.</p>
+    <p class="hint">Старт возможен только когда общий концевик выбранной оси отпущен. Если при запуске он уже нажат, сторона неоднозначна — сначала освободите его ручным движением ниже.</p>
+    <div class="auto-actions">
+      <button id="auto-cal-x" class="primary" type="button">Автокалибровка X</button>
+      <button id="auto-cal-y" class="primary" type="button">Автокалибровка Y</button>
+      <button id="auto-cal-xy" class="primary" type="button">Автокалибровка X + Y</button>
+      <button id="auto-cal-cancel" type="button" disabled>Остановить автокалибровку</button>
+    </div>
+    <div id="auto-cal-status" class="auto-status" role="status" aria-live="polite">Проверяем готовность…</div>
+  </section>
+
+  <section class="panel">
+    <h2>1 · Выбрать ось</h2>
+    <div class="commissioning-grid">
+      <div class="commissioning-card"><strong>Ось X</strong><span id="drive-x-readiness">Читаем профиль…</span></div>
+      <div class="commissioning-card"><strong>Ось Y</strong><span id="drive-y-readiness">Читаем профиль…</span></div>
+    </div>
+    <p id="drive-interlock" class="hint">Проверяем состояние…</p>
+    <div class="axis-tabs" role="tablist" aria-label="Ось калибровки">
+      <button id="drive-tab-x" class="axis-tab" type="button" data-axis-switch="X">X</button>
+      <button id="drive-tab-y" class="axis-tab is-active" type="button" data-axis-switch="Y">Y</button>
+    </div>
+    <div class="drive-toolbar">
+      <label>Текущая ось <select id="drive-axis"><option>X</option><option selected>Y</option></select></label>
+      <label>Быстрый поиск, мм/мин <input id="drive-seek-feedrate" type="number" min="30" max="1200" step="10" value="1200"></label>
+      <label>Точный подход, мм/мин <input id="drive-latch-feedrate" type="number" min="15" max="600" step="5" value="120"></label>
+      <label>Отход перед точным подходом, мм <input id="drive-backoff" type="number" min="0.25" max="10" step="0.25" value="2"></label>
+      <button id="drive-begin" class="primary" type="button">Начать калибровку</button>
+    </div>
+    <label class="drive-confirm"><input id="drive-free-confirm" type="checkbox"><span>Каретка сейчас между концевиками, общий вход отпущен, я наблюдаю за движением.</span></label>
+  </section>
+  <section class="panel">
+    <h2>2 · Найти оба физических края</h2>
+    <div class="drive-status" role="status" aria-live="polite">
+      <span>Координата платы<strong id="drive-position">—</strong></span>
+      <span>Концевик<strong id="drive-switch">Нет сеанса</strong></span>
+      <span>Движение<strong id="drive-run">Остановлено</strong></span>
+    </div>
+    <p id="drive-bounds" class="hint">Начните калибровку.</p>
+    <div class="hold-buttons">
+      <button id="drive-minus" class="hold-button" type="button" disabled><b id="drive-minus-label">Держать −</b><span id="drive-minus-hint">Направление ещё не определено</span></button>
+      <button id="drive-plus" class="hold-button" type="button" disabled><b id="drive-plus-label">Держать +</b><span id="drive-plus-hint">Направление ещё не определено</span></button>
+    </div>
+    <p class="hint">На реальном Marlin быстрый проход теперь непрерывный: FlowEngine отправляет один длинный G1 и во время движения опрашивает M119. При первом контакте штатный M410 останавливает планировщик без разрыва serial-сессии; затем выполняются отход и отдельный непрерывный медленный точный подход. В калибровку записывается второй контакт.</p>
+    <p class="hint">Если концевик уже нажат и его сторона известна из текущего сеанса, разрешён только отход в обратном направлении. Координатного safe range нет; остаются физические концевики, общий СТОП, lease и временной watchdog.</p>
+    <p id="drive-message" class="drive-message" role="status" aria-live="polite"></p>
+  </section>
+  <section class="panel">
+    <h2>3 · Назвать края и сохранить измеренный ход</h2>
+    <p class="hint">После точного срабатывания FlowEngine запоминает контакт. Сразу подпишите его: какой это физический край машины. Держать концевик нажатым во время выбора больше не нужно.</p>
+    <div class="contact-prompt"><strong>Последний найденный край</strong><span id="drive-last-contact">Ещё не найден. Доедьте до физического концевика.</span></div>
+    <div class="edge-grid">
+      <div class="edge-card"><h3>У мотора</h3><p id="drive-motor-contact">Ещё не найден</p><button id="drive-record-motor" type="button" disabled>Это край у мотора</button></div>
+      <div class="edge-card"><h3>От мотора</h3><p id="drive-far-contact">Ещё не найден</p><button id="drive-record-far" type="button" disabled>Это край от мотора</button></div>
+    </div>
+    <p id="drive-mapping" class="hint">После двух краёв здесь появятся направление и полный измеренный ход.</p>
+    <label>Домашний физический край
+      <select id="drive-home-side" disabled>
+        <option value="motor">У мотора</option>
+        <option value="far">От мотора</option>
+      </select>
+    </label>
+    <p class="hint">Именно к этому краю будет идти Home. Это сохраняется в профиле и не угадывается автоматически.</p>
+    <label class="drive-confirm"><input id="drive-map-confirm" type="checkbox" disabled><span>Проверил оба физических края и соответствие «к мотору / от мотора».</span></label>
+    <div class="drive-save">
+      <label>Профиль<input id="drive-name" placeholder="qa_test" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,63}" maxlength="64" disabled></label>
+      <button id="drive-save" class="primary" type="button" disabled>Сохранить калибровку</button>
+    </div>
+    <p class="hint">Сохраняются два контакта, направления подхода, Marlin Count (если доступен), полный ход и число шагов между краями. Это не выполняет Home: после перезапуска абсолютная позиция всё ещё неизвестна.</p>
+  </section>
+  <p><button id="drive-cancel" type="button" disabled>Завершить без сохранения</button></p>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="/static/js/axis-calibration.js"></script><script type="module" src="/static/js/auto-calibration.js"></script>{% endblock %}

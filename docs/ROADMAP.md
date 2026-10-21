@@ -11,7 +11,7 @@ Delivered:
 - Mock transport mirroring Marlin semantics (errors + disconnects injectable).
 - Command queue with per-class timeouts and `M410` abort.
 - Controller state machine.
-- Soft limits enforced in software.
+- Physical X/Y endstop calibration records direction and measured span; normal motion requires a valid reference.
 - REST endpoints: jog / move / home / stop / state / diagnostics / config.
 - WebSocket telemetry for state + position + log.
 - Single-page web UI with per-axis jog panel, status, log, big red Abort.

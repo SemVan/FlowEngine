@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -8,15 +8,18 @@
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/panels.css" />
   <link rel="stylesheet" href="/static/css/fluidics.css" />
+  <link rel="stylesheet" href="/static/css/personal.css" />
 </head>
 <body>
   <header class="topbar">
-    <h1>FlowEngine</h1>
+    <h1><span class="brand-icon">F</span> FlowEngine <small>PERSONAL WORKSPACE</small></h1>
     <nav>
-      <a href="/">Control</a>
-      <a href="/procedures">Procedures</a>
-      <a href="/config">Config</a>
-      <a href="/stepskip">Step-skip</a>
+      <a href="/">◈ &nbsp; Управление</a>
+      <a href="/procedures">▷ &nbsp; Сценарии</a>
+      <a href="/config">⚙ &nbsp; Мои профили</a>
+      <a href="/calibration">⇄ &nbsp; Калибровка X / Y</a>
+      <a href="/valves">↔ &nbsp; Valves · Краны</a>
+      <a href="/stepskip">⌁ &nbsp; Тест шагов</a>
     </nav>
     <div class="status">
       <span id="connection-dot" class="dot dot-unknown" title="connection"></span>
@@ -24,13 +27,17 @@
     </div>
   </header>
   <main>
+    <div class="session-strip"><span id="session-mode">Подключение…</span><span>Активный профиль <b id="active-profile">—</b></span></div>
     {% block content %}{% endblock %}
   </main>
   <footer class="logbar">
-    <button id="abort-btn" type="button">ABORT (M410)</button>
+    <button id="abort-btn" type="button">■ СТОП · M410</button>
+    <button id="reconnect-btn" type="button" hidden title="Переподключить плату с текущим профилем после физической остановки">↻ Переподключить</button>
+    <span id="reconnect-status" role="status" aria-live="polite"></span>
     <ul id="log-tail"></ul>
   </footer>
   <script type="module" src="/static/js/main.js"></script>
+  <script type="module" src="/static/js/personal.js"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

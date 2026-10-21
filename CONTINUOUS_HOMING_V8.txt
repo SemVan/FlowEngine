@@ -1,0 +1,16 @@
+FlowEngine Personal — Continuous Calibration / Home v8
+
+- Real Marlin X/Y seek is continuous: one G1, M119 polling while moving.
+- Routine physical endstop hits use normal queued M410, not CommandQueue.abort; no reconnect is required.
+- After M410 the axis is resynchronized from Marlin Count (fallback M114 R) before the next relative move.
+- Calibration and Home share fast seek -> release/backoff -> slow latch.
+- Calibration can switch X/Y while motion is stopped; each axis draft is preserved in the same session.
+- Home shows live phase text and has a graceful Stop Home button.
+- Global emergency STOP behavior is unchanged: reference is lost and reconnect is required.
+- personal-data and .venv are intentionally not included in this ZIP.
+- Validation: 112/112 tests passed in the build environment.
+
+V8.1 timeout fix:
+- Removed the accidental 0.5 s commissioning serial timeout cap.
+- Normal endstop M410 uses a >=2 s acknowledgement window and does not require reconnect just because the ACK is delayed.
+- Timeout errors now identify the exact G-code command.

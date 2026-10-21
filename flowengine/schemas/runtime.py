@@ -31,7 +31,7 @@ class FirmwareExpectation(BaseModel):
 class TransportConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
-    port: str = "/dev/ttyACM0"
+    port: str = "auto"
     baud: int = 115200
     reconnect_attempts: int = Field(default=5, ge=0)
     reconnect_backoff_s: float = Field(default=1.0, gt=0)

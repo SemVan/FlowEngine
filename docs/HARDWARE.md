@@ -6,14 +6,16 @@ This is the document you fill in when bringing up a new instrument. **None of th
 
 | Marlin axis | Physical device       | Notes |
 |-------------|-----------------------|-------|
-| X           | autosampler X         | wired-OR endstops |
-| Y           | autosampler Y         | wired-OR endstops |
-| Z           | autosampler Z         | `home_direction: max` (top is safe) |
-| E0          | sample syringe        | wired-OR endstops at both ends |
-| E1          | sheath syringe        | wired-OR endstops at both ends |
-| E2          | peristaltic wash pump | encoder feedback (Phase 3) |
-| E3          | sample-line valve     | 2-position, 90°, wired-OR endstops |
-| E4          | sheath-line valve     | 2-position, 90°, wired-OR endstops |
+| X           | sample syringe        | DRIVER0; physical parallel endstops |
+| Y           | sheath syringe        | DRIVER1; physical parallel endstops |
+| A           | wash_valve            | DRIVER3 / E0 socket |
+| B           | sheath_valve          | DRIVER4 / E1 socket |
+| C           | sample_valve          | DRIVER5 / E2 socket |
+| U           | peristaltic wash pump | DRIVER6 / E3 socket |
+
+This table follows the current device_map.yaml; physical E sockets are not
+G-code E axes. All three valve switches share one Z input. Select its exact
+M119 channel on the Valves page; see [VALVES.md](VALVES.md).
 
 If you reassign physical slots, edit `config/device_map.yaml` — never patch Marlin's `Configuration.h` to "fix" polarity or direction. Keep the firmware vanilla; the config file is the single source of truth.
 
@@ -39,7 +41,7 @@ For each newly-wired axis:
 2. **Endstop sanity.** Click "Read endstops". Manually trigger the switch with a finger. The triggered indication should change. Note **which** axis goes hot — that's your wiring map (the wired-OR makes hardware-side disambiguation impossible). Record in this file.
 3. **Low-speed jog with hand on the coupling.** Hand on coupler. Lowest `feedrate_default`. Issue `+0.1 mm` jog. Confirm direction. If wrong, set `dir_invert: true` and retry. **Do NOT skip the hand check** — a polarity-inverted Z can crash hard against the bed.
 4. **Home one axis.** Click "home" on that row. Watch for trigger, back-off, re-home. Time it. If it overshoots, the back-off distance in Marlin firmware is wrong (raise `HOMING_BUMP_MM` for that axis).
-5. **Soft-limit test.** From the UI's "config" panel, read the current `travel`. Issue a jog that would exceed it. The server should reject with HTTP 400 (`soft-limit: ...`) before any G-code is sent.
+5. **X/Y physical calibration.** Open **Калибровка X / Y**, approach each physical switch, label the motor/far side, and save the measured span. Do not enter a guessed working range.
 6. **Abort test.** Issue a long slow move (e.g., full stroke at low feedrate). Hit the Abort button. `M410` is sent; motion should halt within ~0.2 s. State returns to `connected_idle`.
 7. **Disconnect test.** Unplug USB mid-idle. UI should drop to `disconnected` within ~2 s (driven by read-EOF + heartbeat). Replug. State should not auto-resume — motion is blocked until you re-home.
 8. **Repeat per additional axis.** Don't batch bring-up. Each axis gets its own pass.
@@ -50,10 +52,11 @@ After all eight axes are passing this checklist, commit a copy of the populated 
 
 Two physical switches per axis are wired so that triggering either pulls the controller's single input low. Consequences:
 
-- The controller cannot tell which side fired. **Don't ever ask.**
-- Soft limits (`travel`) are enforced in software (`MotionModel`) — they're the only authoritative limit.
-- Homing always goes toward `home_direction`. Reaching the opposite end via runaway is prevented by `travel`-bounded soft limits and abort.
-- Marlin sees one endstop per axis (configured as `min`); we never use Marlin's "max endstop" feature.
+- The controller cannot tell which side fired from the electrical signal alone.
+- For X/Y, side identity comes from the **direction of approach** plus the saved motor/far direction mapping.
+- The two physical switches are the geometric boundary source of truth. Host-side guessed min/max ranges are not used.
+- Calibration stores the measured physical span and Marlin step count (when available) for later homing and step-loss checks.
+- Marlin sees one shared endstop channel per axis; FlowEngine does not pretend that this is a separate MIN/MAX signal.
 
 ## Homing strategy
 

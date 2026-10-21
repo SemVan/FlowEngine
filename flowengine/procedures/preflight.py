@@ -6,6 +6,7 @@ from flowengine.procedures.loader import lint
 from flowengine.schemas import DeviceMap, Procedure, RuntimeParams
 from flowengine.schemas.procedure import (
     HomeStep,
+    HomeValveStep,
     MotorsStep,
     MoveMultiStep,
     PumpMultiStep,
@@ -13,6 +14,7 @@ from flowengine.schemas.procedure import (
     ReferenceTestStep,
     SeekStep,
     SetParamStep,
+    SetValveStep,
     ValveCalibrationStep,
     WaitPressureStep,
 )
@@ -25,6 +27,12 @@ def execution_issues(procedure: Procedure, device: DeviceMap, runtime: RuntimePa
         prefix = f"step {index}: "
         if isinstance(step, (SetParamStep, WaitPressureStep)):
             issues.append(prefix + f"{step.op} is not implemented")
+        elif isinstance(step, (HomeValveStep, SetValveStep)):
+            valve = next((v for v in device.valves if v.name == step.name), None)
+            if not device.shared_valve_endstop.channel:
+                issues.append(prefix + "shared_valve_endstop channel is not configured")
+            if isinstance(step, SetValveStep) and valve and not valve.calibrated:
+                issues.append(prefix + "valve A/B commissioning required")
         elif isinstance(step, PumpStep):
             pump = next((p for p in device.pumps if p.name == step.name), None)
             if pump is None or not pump.calibrated:
@@ -35,6 +43,8 @@ def execution_issues(procedure: Procedure, device: DeviceMap, runtime: RuntimePa
                 if pump is None or not pump.calibrated:
                     issues.append(prefix + f"pump {name} is unknown or uncalibrated")
         elif isinstance(step, (SeekStep, ValveCalibrationStep, ReferenceTestStep)):
+            if any(v.axis == step.axis for v in device.valves):
+                issues.append(prefix + "single-switch valves require Valves commissioning; two-edge/probe search blocked")
             if step.axis not in known:
                 issues.append(prefix + "unknown probe axis")
             if (
@@ -48,6 +58,10 @@ def execution_issues(procedure: Procedure, device: DeviceMap, runtime: RuntimePa
         elif isinstance(step, HomeStep):
             axes = step.axes if step.axes is not None else list(known)
             for axis in axes:
+                if any(v.axis == axis for v in device.valves):
+                    if not device.shared_valve_endstop.channel:
+                        issues.append(prefix + "shared_valve_endstop channel is not configured")
+                    continue
                 if any(
                     axis in group.axes and len(group.axes) > 1 for group in device.endstop_inputs
                 ):

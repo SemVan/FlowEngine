@@ -10,7 +10,7 @@ axes:
     kind: syringe_pump
     steps_per_unit: 80.0
     units: mm
-    travel: 146.2508767
+    travel: null
     home_direction: min
     feedrate_default: 1030.0
     feedrate_max: 1200.0
@@ -21,7 +21,7 @@ axes:
     kind: syringe_pump
     steps_per_unit: 80.0
     units: mm
-    travel: 321.31221
+    travel: null
     home_direction: max
     feedrate_default: 1200.0
     feedrate_max: 1200.0
@@ -72,19 +72,41 @@ axes:
     endstop_channels_shared: false
     notes: "Logical U, physical DRIVER6 / E3 socket. Travel and volume require calibration."
 
+# общий вход трёх кранов; точное имя берём из M119
+shared_valve_endstop:
+  channel: null
+
 valves:
   - name: wash_valve
     axis: A
+    direction_toward_home: 1
+    home_seek_speed: 120.0
+    home_latch_speed: 30.0
+    backoff: 0.5
+    pull_off: 0.5
+    calibrated: false
     position_a: 0.0
     position_b: -9.42227
     home_position: A
   - name: sheath_valve
     axis: B
+    direction_toward_home: 1
+    home_seek_speed: 120.0
+    home_latch_speed: 30.0
+    backoff: 0.5
+    pull_off: 0.5
+    calibrated: false
     position_a: 0.0
     position_b: -12.81382
     home_position: A
   - name: sample_valve
     axis: C
+    direction_toward_home: 1
+    home_seek_speed: 120.0
+    home_latch_speed: 30.0
+    backoff: 0.5
+    pull_off: 0.5
+    calibrated: false
     position_a: 0.0
     position_b: -10.1065
     home_position: A

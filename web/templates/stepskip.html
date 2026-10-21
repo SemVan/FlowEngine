@@ -1,12 +1,39 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="panel">
-  <h2>Return-to-reference test</h2>
-  <p class="phase-note">
-    In the <a href="/procedures">procedure editor</a>, add “Check return-to-reference error”.
-    It requires bench-verified firmware-stopped probe search. Compare the slow baseline
-    with repeated round trips at the selected speed. Results are reference errors,
-    not encoder measurements or proof of skipped steps. The old pressure-ramp API remains unavailable.
+  <h2>Проверка возврата / возможных пропусков шагов X/Y</h2>
+  <p>
+    Проверка использует тот же физический концевик и тот же точный latch, что Home.
+    FlowEngine сравнивает Marlin <b>Count</b> в точке повторного касания с эталоном,
+    сохранённым последним Home.
+  </p>
+  <p class="hint">
+    Перед проверкой ось должна быть откалибрована и иметь <b>REFERENCED</b>.
+    Ось сама идёт на выбранный Home-край: быстрый поиск → освобождение → backoff →
+    медленный точный подход. Координатного safe range здесь нет.
+  </p>
+
+  <div class="controls" style="align-items:end; gap:12px; flex-wrap:wrap;">
+    <label>Допуск, шагов
+      <input id="stepcheck-tolerance" type="number" min="0" step="1" value="8" style="width:110px;" />
+    </label>
+    <button id="stepcheck-x" type="button">Check Steps X</button>
+    <button id="stepcheck-y" type="button">Check Steps Y</button>
+    <button id="stepcheck-xy" type="button" class="primary">Check Steps X + Y</button>
+    <button id="stepcheck-cancel" type="button" disabled>Остановить проверку</button>
+  </div>
+
+  <div id="stepcheck-status" class="phase-note" style="margin-top:16px;">Загружаем состояние…</div>
+  <div id="stepcheck-results" style="margin-top:16px;"></div>
+
+  <p class="hint" style="margin-top:18px;">
+    <b>Важно:</b> это контроль ошибки возврата к физической опоре, а не энкодерное
+    измерение ротора. Большое Δ может означать пропуск шагов, но также люфт,
+    повторяемость микрика, муфту или механическую упругость. При превышении допуска
+    FlowEngine снимает <b>REFERENCED</b> с этой оси и требует новый Home.
   </p>
 </section>
+{% endblock %}
+{% block scripts %}
+<script type="module" src="/static/js/panels/stepskip.js"></script>
 {% endblock %}

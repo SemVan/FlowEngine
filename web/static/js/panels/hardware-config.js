@@ -5,18 +5,18 @@ const container = document.getElementById("hardware-forms");
 let profile;
 let calibrated;
 const specs = {
-  axes: [["marlin_axis", "Axis", "text"], ["name", "Device", "text"],
-    ["kind", "Mechanism", "choice:syringe_pump,peristaltic_pump,valve,autosampler_axis"],
-    ["units", "Axis units", "choice:mm,deg"], ["home_direction", "Home end", "choice:min,max"],
-    ["steps_per_unit", "STEP pulses/unit", "number"], ["travel", "Travel", "number"],
-    ["feedrate_default", "Default units/min", "number"], ["feedrate_max", "Max units/min", "number"],
-    ["accel_max", "Max units/s²", "optional"], ["driver_current_max_ma", "Verified max RMS mA", "optional"]],
-  pumps: [["name", "Pump", "text"], ["axis", "Axis", "text"],
-    ["kind", "Pump type", "choice:syringe,peristaltic"],
-    ["volume_per_unit_ul", "µL/axis unit", "number"], ["dispense_direction", "Dispense sign (+1/-1)", "number"],
-    ["calibrated", "Calibration confirmed", "checkbox"], ["calibration_notes", "Conditions / notes", "text"]],
-  valves: [["name", "Valve", "text"], ["axis", "Axis", "text"], ["position_a", "Position 1/A", "number"],
-    ["position_b", "Position 2/B", "number"], ["home_position", "Home position", "choice:A,B"]],
+  axes: [["marlin_axis", "Ось", "text"], ["name", "Название", "text"],
+    ["kind", "Тип механизма", "choice:syringe_pump,peristaltic_pump,valve,autosampler_axis"],
+    ["units", "Единицы", "choice:mm,deg"], ["home_direction", "Направление home", "choice:min,max"],
+    ["steps_per_unit", "Шагов на единицу", "number"], ["travel", "Ход (для X/Y измеряется по концевикам)", "optional"],
+    ["feedrate_default", "Скорость, ед/мин", "number"], ["feedrate_max", "Макс. скорость", "number"],
+    ["accel_max", "Макс. ускорение", "optional"], ["driver_current_max_ma", "Макс. ток RMS, мА", "optional"]],
+  pumps: [["name", "Насос", "text"], ["axis", "Ось", "text"],
+    ["kind", "Тип насоса", "choice:syringe,peristaltic"],
+    ["volume_per_unit_ul", "мкл на единицу", "number"], ["dispense_direction", "Направление подачи ±1", "number"],
+    ["calibrated", "Калибровка подтверждена", "checkbox"], ["calibration_notes", "Заметки", "text"]],
+  valves: [["name", "Клапан", "text"], ["axis", "Ось", "text"], ["position_a", "Позиция A", "number"],
+    ["position_b", "Позиция B", "number"], ["home_position", "Исходная позиция", "choice:A,B"]],
   endstop_inputs: [["channel", "Marlin channel", "text"], ["axes", "Shared axes (comma separated)", "list"], ["notes", "Wiring / switches", "text"]],
   analog_inputs: [["name", "Sensor", "text"], ["source", "Firmware source (T0/B/ADC0)", "text"],
     ["quantity", "temperature / analog", "text"], ["units", "Units", "text"], ["scale", "Scale", "number"],
@@ -42,31 +42,55 @@ export function renderHardwareForms() {
   if (!container) return;
   profile = JSON.parse(editor.value);
   container.replaceChildren();
+  const runtimeSection = document.createElement('details');
+  const runtimeTitle = document.createElement('summary'); runtimeTitle.textContent = 'Подключение и параметры движения';
+  runtimeSection.append(runtimeTitle);
+  const runtimeGrid = document.createElement('div'); runtimeGrid.className = 'device-grid device-card';
+  for (const [group, name, title, type] of [
+    ['transport','port','Порт (auto или COM…)','text'],
+    ['transport','baud','Скорость порта','number'],
+    ['motion','feedrate_cap','Общий предел скорости','number'],
+    ['motion','enabled','Разрешить движения на приборе','checkbox'],
+    ['motion','configure_firmware','Применять параметры к прошивке','checkbox'],
+  ]) {
+    const label = document.createElement('label'); label.textContent = title;
+    const input = field(profile.runtime[group][name], type);
+    input.dataset.runtimeGroup = group; input.dataset.runtimeField = name;
+    label.append(input); runtimeGrid.append(label);
+  }
+  runtimeSection.append(runtimeGrid); container.append(runtimeSection);
   for (const [kind, columns] of Object.entries(specs)) {
-    const section = document.createElement("fieldset");
-    section.style.overflowX = "auto";
-    const legend = document.createElement("legend"); legend.textContent = kind;
+    const titles = {axes:'Моторы и оси', pumps:'Насосы', valves:'Клапаны', endstop_inputs:'Концевики', analog_inputs:'Датчики'};
+    const section = document.createElement('details');
+    section.open = kind === 'axes';
+    const legend = document.createElement('summary'); legend.textContent = titles[kind];
     section.append(legend);
-    const table = document.createElement("table"); table.className = "jog-table";
-    const header = document.createElement("tr");
-    for (const [, title] of columns) { const th = document.createElement("th"); th.textContent = title; header.append(th); }
-    table.append(header);
+    const table = document.createElement('div');
     const items = profile.device_map[kind] ||= [];
     items.forEach((item, index) => {
-      const row = document.createElement("tr");
-      for (const [name, , type] of columns) {
-        const cell = document.createElement("td"); const input = field(item[name], type);
+      const row = document.createElement('article'); row.className = 'device-card';
+      const title = document.createElement('h3'); title.textContent = `${item.marlin_axis || item.axis || item.channel || ''}  ${item.name || ''}`;
+      row.append(title);
+      const grid = document.createElement('div'); grid.className = 'device-grid'; row.append(grid);
+      for (const [name, labelText, type] of columns) {
+        const cell = document.createElement('label'); cell.textContent = labelText;
+        const input = field(item[name], type);
         input.dataset.kind = kind; input.dataset.index = index; input.dataset.field = name;
-        cell.append(input); row.append(cell);
+        if (kind === "axes" && name === "travel" && ["X", "Y"].includes(item.marlin_axis) && item.endstop_channels_shared !== false) {
+          input.disabled = true;
+          input.value = "";
+          input.title = "Для X/Y с параллельными концевиками ход измеряется физической калибровкой";
+        }
+        cell.append(input); grid.append(cell);
       }
-      const cell = document.createElement("td"); const remove = document.createElement("button");
-      remove.type = "button"; remove.textContent = "Remove";
-      remove.addEventListener("click", () => { applyHardwareForms(); profile.device_map[kind].splice(index, 1); editor.value = JSON.stringify(profile, null, 2); renderHardwareForms(); });
-      cell.append(remove); row.append(cell); table.append(row);
+      const remove = document.createElement('button'); remove.className = 'device-remove';
+      remove.type = 'button'; remove.textContent = 'Удалить устройство';
+      remove.addEventListener('click', () => { applyHardwareForms(); profile.device_map[kind].splice(index, 1); editor.value = JSON.stringify(profile, null, 2); renderHardwareForms(); container.dispatchEvent(new Event('input', {bubbles:true})); });
+      row.append(remove); table.append(row);
     });
     section.append(table);
     if (kind in specs) {
-      const add = document.createElement("button"); add.type = "button"; add.textContent = `Add ${kind}`;
+      const add = document.createElement("button"); add.type = "button"; add.textContent = `+ Добавить`;
       add.addEventListener("click", () => {
         applyHardwareForms();
         const defaults = {
@@ -77,7 +101,7 @@ export function renderHardwareForms() {
           endstop_inputs: {channel: "probe", axes: [], active_high: true, notes: ""},
           analog_inputs: {name: "sensor", source: "T0", quantity: "temperature", units: "°C", scale: 1, offset: 0, poll_hz: 1, notes: ""},
         };
-        profile.device_map[kind].push(defaults[kind]);
+        profile.device_map[kind].push(defaults[kind]); container.dispatchEvent(new Event('input', {bubbles:true}));
         editor.value = JSON.stringify(profile, null, 2); renderHardwareForms();
       });
       section.append(add);
@@ -94,7 +118,13 @@ export function applyHardwareForms() {
   // Refuse stale forms after a manual JSON edit; do not silently overwrite that edit.
   const current = JSON.parse(editor.value);
   if (JSON.stringify(current) !== JSON.stringify(profile)) throw new Error("JSON changed: load forms from JSON before applying forms");
+  for (const input of container.querySelectorAll('[data-runtime-field]')) {
+    const value = input.type === 'checkbox' ? input.checked : input.type === 'number' ? Number(input.value) : input.value;
+    if (typeof value === 'number' && (!input.value.trim() || !Number.isFinite(value))) throw new Error('Введите корректное число');
+    profile.runtime[input.dataset.runtimeGroup][input.dataset.runtimeField] = value;
+  }
   for (const input of container.querySelectorAll("[data-field]")) {
+    if (input.disabled) continue;
     const type = input.dataset.valueType;
     const value = type === "checkbox" ? input.checked : type === "list" ? input.value.split(",").map(s => s.trim()).filter(Boolean) :
       ["number", "optional"].includes(type) ? (input.value === "" && type === "optional" ? null : Number(input.value)) : input.value;

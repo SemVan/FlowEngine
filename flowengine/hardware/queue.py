@@ -6,9 +6,7 @@ This is where serial discipline lives. Cardinal rules:
 2. Every response line is classified. Unknown lines log WARNING and are dropped;
    they are never treated as an implicit `ok`.
 3. Every command class has a timeout. A timeout is an error, not a hang.
-4. Abort (`M410`) bypasses the queue: it's emitted out-of-band, then we drain
-   pending `ok`s and mark the queue as aborted. The current command's awaiter
-   gets `TransportTimeout`/cancellation.
+4. после M410 очередь заблокирована. старые ok не читаем; нужна новая связь.
 5. On `Resend: N`, the transport layer (Marlin) re-frames + resends; we keep
    waiting for our `ok`.
 """
@@ -66,6 +64,8 @@ class CommandQueue:
         self._default_timeout = default_timeout_s
         self._send_lock = asyncio.Lock()
         self._aborted = asyncio.Event()
+        self._release_lock = asyncio.Lock()
+        self._abort_releases: dict[str, bool] = {}
         self._depth = 0
         self.trace: deque[dict[str, str]] = deque(maxlen=1000)
 
@@ -77,6 +77,10 @@ class CommandQueue:
     @property
     def depth(self) -> int:
         return self._depth
+
+    @property
+    def transport_name(self) -> str:
+        return self._transport.name
 
     async def send(self, gcode: str, *, timeout: float | None = None) -> CommandResult:
         """Send a single G-code line. Returns when `ok` arrives or timeout/error fires."""
@@ -111,9 +115,46 @@ class CommandQueue:
             # Loss of USB is NOT evidence that physical motion stopped.
             log.warning("abort attempted while transport closed")
 
+    async def request_motor_release(self, axis: str) -> bool:
+        """запрашиваем M18 после Stop; успешная отправка ещё не доказывает отключение мотора"""
+        if len(axis) != 1 or not "A" <= axis <= "Z":
+            raise ValueError("one uppercase motor axis required")
+        if not self._aborted.is_set():
+            raise ControllerError("out-of-band motor release requires an aborted queue")
+        async with self._release_lock:
+            if axis in self._abort_releases:
+                return self._abort_releases[axis]
+            self._abort_releases[axis] = False
+            try:
+                self._record("TX", f"M18 {axis} (out-of-band release request; unconfirmed)")
+                await self._transport.send_line(f"M18 {axis}")
+            except Exception:
+                log.warning("motor %s release could not be sent; power state UNKNOWN", axis, exc_info=True)
+            else:
+                self._abort_releases[axis] = True
+            return self._abort_releases[axis]
+
     def reset_abort(self) -> None:
         """Operator acknowledged the abort; the queue is usable again."""
         self._aborted.clear()
+
+    async def _read_or_abort(self, timeout: float) -> str:
+        """прерываем ожидание по Stop; для дальнейшей работы нужна новая связь"""
+        if self._aborted.is_set():
+            raise ControllerError("command interrupted by Stop; reconnect before continuing")
+        reader = asyncio.create_task(self._transport.read_line(timeout=timeout))
+        stopped = asyncio.create_task(self._aborted.wait())
+        try:
+            await asyncio.wait({reader, stopped}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for task in (reader, stopped):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(reader, stopped, return_exceptions=True)
+        # Stop важнее ok, даже если они пришли одновременно
+        if self._aborted.is_set():
+            raise ControllerError("command interrupted by Stop; reconnect before continuing")
+        return reader.result()
 
     async def _await_ok(self, sent: str, timeout: float) -> CommandResult:
         """Read response lines until we see `ok` (or fail). Aggregate context."""
@@ -127,9 +168,11 @@ class CommandQueue:
             if remaining <= 0:
                 raise TransportTimeout(f"no ok for {sent!r} within {timeout}s")
             try:
-                line = await self._transport.read_line(timeout=remaining)
-            except TransportTimeout:
-                raise
+                line = await self._read_or_abort(remaining)
+            except TransportTimeout as exc:
+                raise TransportTimeout(
+                    f"{sent}: no response within {timeout:.3f}s"
+                ) from exc
             result.raw.append(line)
             self._record("RX", line)
             resp = parse_line(line)
@@ -163,7 +206,11 @@ class CommandQueue:
                     raise ControllerError(f"Marlin error: {msg}")
                 case ResendRequest(line_number=n):
                     if isinstance(self._transport, MarlinTransport):
-                        await self._transport.resend(n)
+                        if n == 0:
+                            await self._transport.resynchronize()
+                            await self._transport.send_line(sent)
+                        else:
+                            await self._transport.resend(n)
                         continue
                     raise TransportProtocolError(
                         f"transport asked for resend of N{n} but transport doesn't support it"

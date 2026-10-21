@@ -6,18 +6,21 @@ Issues `M400` before any `M114` we actually care about.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import re
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
+from flowengine.errors import ControllerError, StateError
+from flowengine.hardware.endstop_seek import seek_switch
 from flowengine.hardware.homing.base import HomingStrategy
 from flowengine.hardware.motion import MotionModel
 from flowengine.hardware.queue import CommandQueue, CommandResult
-from flowengine.schemas.device import DeviceMap
+from flowengine.schemas.device import AxisCalibration, DeviceMap
 from flowengine.schemas.procedure import NumberValue, PumpDose
 from flowengine.schemas.runtime import FirmwareExpectation, Timeouts
 
@@ -45,6 +48,37 @@ class GcodeSender:
         self._accel_cap = accel_cap
         self._probe_verified = self._firmware.probe_target_verified
         self._counts: dict[str, int] = {}
+        self._reference_counts: dict[str, int] = {}
+        self._reference_sides: dict[str, str] = {}
+        self._expected: dict[str, float] = {}
+        self.manual_session: dict[str, Any] | None = None
+        self.manual_lock = asyncio.Lock()
+        self.reference_epoch = 0
+        self._home_cancel = asyncio.Event()
+        self._home_active = False
+        self.auto_calibration_job: dict[str, Any] | None = None
+        self.step_check_job: dict[str, Any] | None = None
+        from flowengine.hardware.valves import ValveSubsystem
+        self.valves = ValveSubsystem(self)
+
+    async def set_valve(self, name: str, position: str) -> None:
+        await self.valves.set_valve(name, position)
+
+    async def home_valve(self, name: str):
+        return await self.valves.home_valve(name)
+
+    async def _check_manual_endstops(self, axes: list[str]) -> None:
+        guarded = [a for a in axes if self._map.axis(a).axis_calibration is not None]
+        if not guarded:
+            return
+        switches = await self.read_endstops()
+        for axis in guarded:
+            if switches.get(f"{axis.lower()}_min") is not False:
+                self._motion.invalidate(guarded)
+                raise ControllerError(
+                    f"{axis}: концевик нажат или недоступен. Обычное движение запрещено; "
+                    "восстановите reference через штатный Home/Reference."
+                )
 
     async def configure(self) -> None:
         """Push baseline config to the controller (steps/unit, absolute mode)."""
@@ -131,6 +165,7 @@ class GcodeSender:
         duration_s: NumberValue | None = None,
     ) -> dict[str, Any]:
         axes = {a: float(v) for a, v in axes.items()}
+        self.valves.reject_axes(list(axes))
         feedrate = float(feedrate) if feedrate is not None else None
         duration_s = float(duration_s) if duration_s is not None else None
         if not axes:
@@ -172,6 +207,7 @@ class GcodeSender:
                 raise ValueError(
                     f"requested component speed exceeds limit on {a}; increase duration"
                 )
+        await self._check_manual_endstops(list(axes))
         await self._q.send("G90", timeout=self._timeouts.diagnostics)
         await self._q.send(
             "G1 " + " ".join(f"{a}{p.target:.4f}" for a, p in plans.items()) + f" F{speed:.3f}",
@@ -179,6 +215,7 @@ class GcodeSender:
         )
         for a, p in plans.items():
             self._motion.accept_target(a, p.target)
+            self._expected[a] = p.target
         return {
             "nominal_duration_s": 60 * length / speed,
             "feedrate": speed,
@@ -213,6 +250,8 @@ class GcodeSender:
 
     async def motors(self, enabled: bool, axes: list[str] | None = None) -> None:
         selected = axes if axes is not None else [a.marlin_axis for a in self._map.axes]
+        if self.valves.lock.locked():
+            raise StateError("Valve motion active; motor configuration blocked")
         if not selected:
             raise ValueError("select at least one axis")
         for a in selected:
@@ -220,7 +259,11 @@ class GcodeSender:
             if len(a) != 1:
                 raise ValueError("motor control requires single-letter firmware axes")
         if not enabled:
+            self.valves.invalidate(selected)
             self._motion.invalidate(selected)
+            for axis in selected:
+                self._reference_counts.pop(axis, None)
+                self._reference_sides.pop(axis, None)
         await self.wait_idle()
         await self._q.send(
             ("M17" if enabled else "M18") + " " + " ".join(selected),
@@ -250,11 +293,42 @@ class GcodeSender:
             )
         return await self.move_multi(axes, relative=True, duration_s=durations[0])
 
+    @property
+    def reference_counts(self) -> dict[str, int]:
+        homed = self._motion.homed
+        return {axis: count for axis, count in self._reference_counts.items() if homed.get(axis)}
+
+    @property
+    def reference_sides(self) -> dict[str, str]:
+        homed = self._motion.homed
+        return {axis: side for axis, side in self._reference_sides.items() if homed.get(axis)}
+
     async def abort(self) -> None:
+        release_valve = self.valves.active_service or self.valves.active_valve
+        self.reference_epoch += 1
+        self.manual_session = None
+        self._expected.clear()
+        self._reference_counts.clear()
+        self._reference_sides.clear()
         self._motion.invalidate()
-        await self._q.abort()
+        self.valves.invalidate()
+        try:
+            await self._q.abort()
+        finally:
+            if release_valve:
+                cfg = self.valves.config(release_valve)
+                st = self.valves.states[release_valve]
+                st.service_release = "UNKNOWN"
+                # для E0/E3 нельзя безопасно выбрать один драйвер через M18
+                written = False
+                if len(cfg.axis) == 1:
+                    written = await self._q.request_motor_release(cfg.axis)
+                st.service_release = "REQUESTED_UNCONFIRMED" if written else "UNKNOWN"
 
     def invalidate_positions(self) -> None:
+        self.valves.invalidate()
+        self._reference_counts.clear()
+        self._reference_sides.clear()
         self._motion.invalidate()
 
     def validate_raw(self, command: str, confirmed: bool = False) -> tuple[str, bool]:
@@ -264,7 +338,18 @@ class GcodeSender:
         if not re.match(r"^[GMT]\d+(?:\.\d+)?(?:\s|$)", command, re.I) or "*" in command:
             raise ValueError("unframed G/M/T command required")
         token = command.split()[0].upper()
+        if self.valves.lock.locked():
+            raise StateError("Valve operation active; console blocked")
+        valve_axes = {v.axis for v in self._map.valves}
+        # сырые команды не должны обходить управление кранами
+        if token.startswith("G"):
+            args = command[len(token):].upper()
+            mentioned = {a.marlin_axis for a in self._map.axes
+                         if re.search(rf"{re.escape(a.marlin_axis)}(?=[+\-.\d\s]|$)", args)}
+            if (float(token[1:]) == 28 and not mentioned) or mentioned & valve_axes:
+                raise StateError("Raw valve movement/G28 blocked; use Valves API")
         readonly = token in {"M105", "M114", "M115", "M119", "M122", "M503"}
+        readonly = readonly or command.upper() == "M211"
         if not readonly and not confirmed:
             raise ValueError("confirm raw command: it may move hardware or change settings")
         return command, readonly
@@ -272,7 +357,7 @@ class GcodeSender:
     async def raw(self, command: str, confirmed: bool = False) -> CommandResult:
         command, readonly = self.validate_raw(command, confirmed)
         if not readonly:
-            self._motion.invalidate()
+            self.invalidate_positions()
         return await self._q.send(command, timeout=self._timeouts.move)
 
     async def sensors(self) -> dict[str, Any]:
@@ -300,6 +385,7 @@ class GcodeSender:
         self, axis: str, channel: str, delta: NumberValue, feedrate: NumberValue, zero: bool = False
     ) -> dict[str, Any]:
         delta, feedrate = float(delta), float(feedrate)
+        self.valves.reject_axes([axis])
         """Firmware-stopped contact search; never substitute host M119 polling."""
         if (
             not self._probe_verified
@@ -313,7 +399,7 @@ class GcodeSender:
         if not all(math.isfinite(x) for x in (delta, feedrate)) or delta == 0 or feedrate <= 0:
             raise ValueError("seek delta must be nonzero; feedrate positive and finite")
         cfg = self._map.axis(axis)
-        if abs(delta) > cfg.travel or feedrate > self._motion.max_feedrate(axis):
+        if abs(delta) > cfg.mechanical_travel or feedrate > self._motion.max_feedrate(axis):
             raise ValueError("seek exceeds configured travel/speed")
         if zero and ((delta < 0) != (cfg.home_direction == "min")):
             raise ValueError("zero search direction must match configured home direction")
@@ -353,11 +439,11 @@ class GcodeSender:
     async def _probe_backoff(self, axis: str, delta: float, channel: str) -> None:
         """Bounded commissioning motion away from the just-confirmed switch."""
         cfg = self._map.axis(axis)
-        if not math.isfinite(delta) or not 0 < abs(delta) <= cfg.travel:
+        if not math.isfinite(delta) or not 0 < abs(delta) <= cfg.mechanical_travel:
             raise ValueError("invalid bounded backoff")
         position = (await self.wait_idle())[axis]
         target = position + delta
-        lo, hi = (0, cfg.travel) if cfg.home_direction == "min" else (-cfg.travel, 0)
+        lo, hi = (0, cfg.mechanical_travel) if cfg.home_direction == "min" else (-cfg.mechanical_travel, 0)
         if not lo <= target <= hi:
             raise ValueError("backoff outside configured bounds")
         await self._q.send("G90", timeout=self._timeouts.diagnostics)
@@ -379,6 +465,7 @@ class GcodeSender:
         backoff: float,
         repeats: int = 3,
     ) -> dict[str, Any]:
+        self.valves.reject_axes([axis])
         cfg = self._map.axis(axis)
         if (
             not all(math.isfinite(v) and v > 0 for v in (search_distance, feedrate, backoff))
@@ -430,7 +517,7 @@ class GcodeSender:
         if (
             not math.isfinite(delta)
             or delta * sign >= 0
-            or abs(delta) + backoff > cfg.travel
+            or abs(delta) + backoff > cfg.mechanical_travel
             or not 0 < backoff < abs(delta)
         ):
             raise ValueError(
@@ -438,7 +525,7 @@ class GcodeSender:
             )
         if not math.isfinite(tolerance_pulses) or tolerance_pulses < 0:
             raise ValueError("nonnegative finite tolerance required")
-        await self.seek(axis, channel, sign * cfg.travel, reference_feedrate, True)
+        await self.seek(axis, channel, sign * cfg.mechanical_travel, reference_feedrate, True)
         corrections = []
         for i in range(repeats + 1):
             await self._probe_backoff(axis, -sign * backoff, channel)
@@ -449,7 +536,7 @@ class GcodeSender:
                     await self.jog(axis, -delta, feedrate)
                     await self.wait_idle()
             result = await self.seek(
-                axis, channel, sign * min(cfg.travel, backoff * 3), reference_feedrate, True
+                axis, channel, sign * min(cfg.mechanical_travel, backoff * 3), reference_feedrate, True
             )
             corrections.append(abs(result["step_pulses"]))
         await self._probe_backoff(axis, -sign * backoff, channel)
@@ -461,7 +548,12 @@ class GcodeSender:
         }
 
     async def jog(self, axis: str, delta: float, feedrate: float | None = None) -> None:
+        valve = self.valves.for_axis(axis)
+        if valve:
+            return await self.valves.jog(valve.name, delta)
+        self.valves.reject_axes([axis])
         p = self._motion.plan_relative(axis, delta, feedrate)
+        await self._check_manual_endstops([axis])
         # Never trust the modal state left by another host/session.
         await self._q.send("G90", timeout=self._timeouts.diagnostics)
         await self._q.send(
@@ -469,28 +561,399 @@ class GcodeSender:
             timeout=self._timeouts.move,
         )
         self._motion.accept_target(axis, p.target)
+        self._expected[axis] = p.target
 
     async def move_to(self, axis: str, target: float, feedrate: float | None = None) -> None:
+        valve = self.valves.for_axis(axis)
+        if valve:
+            for position, coordinate in (("A", valve.position_a), ("B", valve.position_b)):
+                if abs(target - coordinate) < 1e-6:
+                    return await self.set_valve(valve.name, position)
+            raise StateError("Valve absolute motion requires calibrated Go A/B")
+        self.valves.reject_axes([axis])
         p = self._motion.plan_absolute(axis, target, feedrate)
+        await self._check_manual_endstops([axis])
         await self._q.send("G90", timeout=self._timeouts.diagnostics)
         await self._q.send(
             f"G1 {axis}{p.target:.4f} F{p.feedrate:.2f}",
             timeout=self._timeouts.move,
         )
         self._motion.accept_target(axis, p.target)
+        self._expected[axis] = p.target
 
-    async def home(self, axes: list[str] | None = None) -> None:
+    async def _axis_snapshot(self, axis: str) -> tuple[float, bool, int | None]:
+        result = await self._q.send("M114", timeout=self._timeouts.diagnostics)
+        if axis not in (result.position or {}):
+            raise ControllerError(f"{axis}: контроллер не сообщил позицию")
+        counts: dict[str, int] = {}
+        for line in result.raw:
+            if "Count " not in line:
+                continue
+            counts.update({a: int(v) for a, v in re.findall(r"([A-Z]):(-?\d+)", line.split("Count ", 1)[1])})
+        self._counts.update(counts)
+        switches = await self.read_endstops()
+        channel = f"{axis.lower()}_min"
+        if channel not in switches:
+            raise ControllerError(f"{axis}: вход {channel} не найден в M119")
+        return result.position[axis], switches[channel], counts.get(axis)
+
+    async def _parallel_move_segment(
+        self, axis: str, target: float, feedrate: float
+    ) -> bool:
+        await self._q.send(
+            f"G1 {axis}{target:.4f} F{feedrate:.2f}", timeout=self._timeouts.move
+        )
+        await self._q.send("M400", timeout=self._timeouts.move)
+        switches = await self.read_endstops()
+        channel = f"{axis.lower()}_min"
+        if channel not in switches:
+            raise ControllerError(f"{axis}: вход {channel} не найден в M119")
+        return switches[channel]
+
+    async def _home_progress(
+        self,
+        callback: Callable[[str], Awaitable[None]] | None,
+        detail: str,
+    ) -> None:
+        if callback is not None:
+            await callback(detail)
+
+    async def cancel_home(self) -> bool:
+        if not self._home_active:
+            return False
+        self._home_cancel.set()
+        return True
+
+    async def _home_parallel_axis(
+        self,
+        axis: str,
+        progress: Callable[[str], Awaitable[None]] | None = None,
+        calibration: AxisCalibration | None = None,
+        *,
+        verify_baseline_count: int | None = None,
+        tolerance_steps: float | None = None,
+        update_reference_baseline: bool = True,
+    ) -> dict[str, Any]:
+        """ищем микрик X/Y; длину хода задаёт тайм-аут, границу показывает сам микрик"""
+        cfg = self._map.axis(axis)
+        cal = calibration or cfg.axis_calibration
+        if cal is None:
+            raise ValueError(f"{axis}: сначала выполните физическую калибровку X/Y")
+        if axis not in {"X", "Y"} or not cfg.endstop_channels_shared:
+            raise ValueError(f"{axis}: parallel-endstop Home предназначен только для откалиброванных X/Y")
+
+        position, pressed, _ = await self._axis_snapshot(axis)
+        if pressed:
+            raise ValueError(
+                f"{axis}: общий концевик уже нажат, а его сторона после запуска неизвестна. "
+                "Сначала освободите его через калибровочный ручной проход, затем повторите Home."
+            )
+
+        approach = cal.home_approach_direction
+        away = -approach
+        seek = min(cal.seek_feedrate, self._motion.max_feedrate(axis))
+        latch = min(cal.latch_feedrate, seek)
+        expected_seek_s = 60.0 * cal.travel / max(seek, 1e-9)
+        watchdog_s = max(self._timeouts.homing, min(300.0, expected_seek_s * 2.0 + 20.0))
+        channel = f"{axis.lower()}_min"
+        soft_endstops_disabled = False
+
+        def cancelled() -> str | None:
+            return "cancelled" if self._home_cancel.is_set() else None
+
+        async def poll_progress(phase: str, elapsed: float, switch: bool) -> None:
+            await self._home_progress(
+                progress,
+                f"Home {axis}: {phase} · {elapsed:.1f} с · концевик {'НАЖАТ' if switch else 'open'}",
+            )
+
+        async def fixed_move(direction: int, distance: float, feedrate: float) -> None:
+            current, _, _ = await self._axis_snapshot(axis)
+            target = current + direction * distance
+            await self._q.send("G90", timeout=self._timeouts.diagnostics)
+            await self._q.send(
+                f"G1 {axis}{target:.4f} F{feedrate:.2f}", timeout=self._timeouts.move
+            )
+            await self._q.send("M400", timeout=self._timeouts.move)
+
+        self._motion.invalidate([axis])
+        try:
+            await self._q.send("M211 S0", timeout=self._timeouts.diagnostics)
+            soft_endstops_disabled = True
+
+            await self._home_progress(progress, f"Home {axis}: быстрый поиск края «{cal.home_side}»")
+            coarse = await seek_switch(
+                self._q,
+                axis=axis,
+                channel=channel,
+                direction=approach,
+                feedrate=seek,
+                target_pressed=True,
+                timeout_s=watchdog_s,
+                steps_per_unit=cfg.steps_per_unit,
+                diagnostics_timeout=self._timeouts.diagnostics,
+                move_timeout=self._timeouts.move,
+                stop_reason=cancelled,
+                on_poll=lambda e, sw: poll_progress("быстрый поиск", e, sw),
+            )
+            if not coarse.reached:
+                if coarse.stop_reason == "cancelled":
+                    raise StateError(f"{axis}: Home остановлен оператором")
+                raise ValueError(f"{axis}: Home watchdog истёк — физический концевик не найден")
+
+            await self._home_progress(progress, f"Home {axis}: освобождаем концевик")
+            released = await seek_switch(
+                self._q,
+                axis=axis,
+                channel=channel,
+                direction=away,
+                feedrate=latch,
+                target_pressed=False,
+                timeout_s=max(5.0, 60.0 * (cal.backoff_mm + 2.0) / max(latch, 1e-9)),
+                steps_per_unit=cfg.steps_per_unit,
+                diagnostics_timeout=self._timeouts.diagnostics,
+                move_timeout=self._timeouts.move,
+                stop_reason=cancelled,
+                on_poll=lambda e, sw: poll_progress("освобождение", e, sw),
+            )
+            if not released.reached:
+                if released.stop_reason == "cancelled":
+                    raise StateError(f"{axis}: Home остановлен оператором")
+                raise ControllerError(f"{axis}: концевик не освободился при отходе")
+
+            await self._home_progress(progress, f"Home {axis}: отход {cal.backoff_mm:.2f} мм")
+            await fixed_move(away, cal.backoff_mm, min(seek, 600.0))
+            if (await self.read_endstops()).get(channel) is not False:
+                raise ControllerError(f"{axis}: концевик повторно сработал во время Home backoff")
+
+            await self._home_progress(progress, f"Home {axis}: точный медленный подход")
+            precise = await seek_switch(
+                self._q,
+                axis=axis,
+                channel=channel,
+                direction=approach,
+                feedrate=latch,
+                target_pressed=True,
+                timeout_s=max(10.0, 60.0 * (cal.backoff_mm + 3.0) / max(latch, 1e-9)),
+                steps_per_unit=cfg.steps_per_unit,
+                diagnostics_timeout=self._timeouts.diagnostics,
+                move_timeout=self._timeouts.move,
+                stop_reason=cancelled,
+                on_poll=lambda e, sw: poll_progress("точный подход", e, sw),
+            )
+            if not precise.reached:
+                if precise.stop_reason == "cancelled":
+                    raise StateError(f"{axis}: Home остановлен оператором")
+                raise ControllerError(f"{axis}: точный Home-контакт не найден")
+
+            _, confirmed_pressed, latch_count = await self._axis_snapshot(axis)
+            if not confirmed_pressed:
+                raise ControllerError(f"{axis}: точный Home-контакт не подтвердился")
+
+            check_result: dict[str, Any] | None = None
+            if verify_baseline_count is not None:
+                if latch_count is None:
+                    raise ControllerError(
+                        f"{axis}: Marlin Count недоступен — проверка возврата по шагам невозможна"
+                    )
+                if tolerance_steps is None or not math.isfinite(tolerance_steps) or tolerance_steps < 0:
+                    raise ValueError("tolerance_steps must be a nonnegative finite number")
+                delta_steps = latch_count - verify_baseline_count
+                suspected = abs(delta_steps) > tolerance_steps
+                check_result = {
+                    "baseline_count": verify_baseline_count,
+                    "measured_count": latch_count,
+                    "delta_steps": delta_steps,
+                    "abs_delta_steps": abs(delta_steps),
+                    "tolerance_steps": tolerance_steps,
+                    "status": "STEP_LOSS" if suspected else "OK",
+                    "suspected_position_error": suspected,
+                    "warning": (
+                        "Отклонение возврата к физическому концевику не доказывает пропуск шагов: "
+                        "в него также входят повторяемость концевика, люфт и механическая упругость."
+                    ),
+                }
+                await self._home_progress(
+                    progress,
+                    f"Check {axis}: Δ={delta_steps:+d} шагов · допуск ±{tolerance_steps:g} · "
+                    + ("STEP_LOSS" if suspected else "OK"),
+                )
+                if suspected:
+                    # после неудачной проверки отходим от микрика, но reference не восстанавливаем
+                    await fixed_move(away, cal.backoff_mm, latch)
+                    _, final_pressed, _ = await self._axis_snapshot(axis)
+                    if final_pressed:
+                        raise ControllerError(f"{axis}: концевик остался нажат после проверки шагов")
+                    self._motion.invalidate([axis])
+                    self._reference_counts.pop(axis, None)
+                    self._reference_sides.pop(axis, None)
+                    return {
+                        "axis": axis,
+                        "home_side": cal.home_side,
+                        "reference_coordinate": cal.home_coordinate,
+                        "position": None,
+                        "reference_count": None,
+                        "seek_feedrate": seek,
+                        "latch_feedrate": latch,
+                        "backoff_mm": cal.backoff_mm,
+                        "continuous_seek": self._q.transport_name != "mock",
+                        "step_check": check_result,
+                        "referenced": False,
+                    }
+
+            reference_coordinate = cal.home_coordinate
+            await self._home_progress(progress, f"Home {axis}: фиксируем reference {reference_coordinate:.3f}")
+            await self._q.send(
+                f"G92 {axis}{reference_coordinate:.4f}", timeout=self._timeouts.diagnostics
+            )
+
+            # от точного касания отходим только на заданный backoff
+            await self._home_progress(progress, f"Home {axis}: финальный отход {cal.backoff_mm:.2f} мм")
+            if self._home_cancel.is_set():
+                raise StateError(f"{axis}: Home остановлен оператором")
+            await fixed_move(away, cal.backoff_mm, latch)
+
+            final_position, final_pressed, _ = await self._axis_snapshot(axis)
+            if final_pressed:
+                raise ControllerError(f"{axis}: концевик остался нажат после Home")
+            self._motion.mark_referenced(axis, final_position)
+            if update_reference_baseline:
+                if latch_count is not None:
+                    self._reference_counts[axis] = latch_count
+                else:
+                    self._reference_counts.pop(axis, None)
+            self._reference_sides[axis] = cal.home_side
+            await self._home_progress(progress, f"Home {axis}: готово · REFERENCED")
+            result = {
+                "axis": axis,
+                "home_side": cal.home_side,
+                "reference_coordinate": reference_coordinate,
+                "position": final_position,
+                "reference_count": self._reference_counts.get(axis),
+                "seek_feedrate": seek,
+                "latch_feedrate": latch,
+                "backoff_mm": cal.backoff_mm,
+                "continuous_seek": self._q.transport_name != "mock",
+                "referenced": True,
+            }
+            if check_result is not None:
+                result["step_check"] = check_result
+            return result
+        finally:
+            if soft_endstops_disabled:
+                await self._q.send("M211 S1", timeout=self._timeouts.diagnostics)
+
+    async def home(
+        self,
+        axes: list[str] | None = None,
+        progress: Callable[[str], Awaitable[None]] | None = None,
+    ) -> dict[str, Any]:
+        epoch = self.reference_epoch
+        self.manual_session = None
+        self._expected.clear()
         targets = axes if axes is not None else [a.marlin_axis for a in self._map.axes]
+        if not targets:
+            raise ValueError("select at least one axis to home")
+        if any(self.valves.for_axis(a) for a in targets):
+            if self.valves.lock.locked():
+                raise StateError("Valve motion active")
+            if await self.valves.read():
+                raise StateError("Shared valve endstop TRIGGERED / SOURCE UNKNOWN; service release required")
         for a in targets:
+            self._map.axis(a)
             if self._map.axis(a).homing_strategy != "endstop":
                 raise ValueError("sensorless/crash homing is not implemented")
-            if any(a in g.axes and len(g.axes) > 1 for g in self._map.endstop_inputs):
-                raise ValueError(
-                    "shared-input home requires a verified sequential seek procedure, not G28"
-                )
+
         self._motion.invalidate(targets)
-        homed = await self._homing.home(self._q, axes)
-        self._motion.mark_homed(homed)
+        for a in targets:
+            self._reference_counts.pop(a, None)
+            self._reference_sides.pop(a, None)
+
+        self._home_cancel.clear()
+        self._home_active = True
+        details: dict[str, Any] = {}
+        try:
+            for axis in targets:
+                if self._home_cancel.is_set():
+                    raise StateError("Home остановлен оператором")
+                cfg = self._map.axis(axis)
+                valve = self.valves.for_axis(axis)
+                if valve:
+                    details[axis] = await self.home_valve(valve.name)
+                elif cfg.kind == "valve":
+                    raise StateError("Valve axis has no ValveConfig; G28 blocked")
+                elif cfg.axis_calibration is not None and axis in {"X", "Y"} and cfg.endstop_channels_shared:
+                    details[axis] = await self._home_parallel_axis(axis, progress)
+                else:
+                    if any(axis in g.axes and len(g.axes) > 1 for g in self._map.endstop_inputs):
+                        raise ValueError(
+                            "shared-input home requires a verified sequential seek procedure, not G28"
+                        )
+                    await self._home_progress(progress, f"Home {axis}: firmware G28")
+                    homed = await self._homing.home(self._q, [axis])
+                    self._motion.mark_homed(homed)
+                    details[axis] = {"axis": axis, "strategy": "g28", "position": 0.0}
+
+                if epoch != self.reference_epoch:
+                    self._motion.invalidate(targets)
+                    raise ControllerError("Home прерван; привязка потеряна")
+            return details
+        finally:
+            self._home_active = False
+            self._home_cancel.clear()
+
+
+    async def check_reference(
+        self,
+        axes: list[str],
+        *,
+        tolerance_steps: float,
+        progress: Callable[[str], Awaitable[None]] | None = None,
+    ) -> dict[str, Any]:
+        """сравниваем Count при касании HOME; разница бывает из-за люфта, микрика или пропуска шагов"""
+        if not axes:
+            raise ValueError("select at least one axis to check")
+        if not math.isfinite(tolerance_steps) or tolerance_steps < 0:
+            raise ValueError("tolerance_steps must be a nonnegative finite number")
+
+        epoch = self.reference_epoch
+        baselines: dict[str, int] = {}
+        for axis in axes:
+            cfg = self._map.axis(axis)
+            if axis not in {"X", "Y"} or cfg.axis_calibration is None or not cfg.endstop_channels_shared:
+                raise ValueError(f"{axis}: проверка шагов поддерживается только для откалиброванных X/Y")
+            if not self._motion.homed.get(axis, False):
+                raise ValueError(f"{axis}: сначала выполните Home — reference отсутствует")
+            baseline = self._reference_counts.get(axis)
+            if baseline is None:
+                raise ValueError(
+                    f"{axis}: эталонный Marlin Count отсутствует. Повторите Home и затем проверку шагов."
+                )
+            baselines[axis] = baseline
+
+        self.manual_session = None
+        self._expected.clear()
+        self._home_cancel.clear()
+        self._home_active = True
+        details: dict[str, Any] = {}
+        try:
+            for axis in axes:
+                if self._home_cancel.is_set():
+                    raise StateError("Проверка шагов остановлена оператором")
+                details[axis] = await self._home_parallel_axis(
+                    axis,
+                    progress,
+                    verify_baseline_count=baselines[axis],
+                    tolerance_steps=tolerance_steps,
+                    update_reference_baseline=False,
+                )
+                if epoch != self.reference_epoch:
+                    self._motion.invalidate(axes)
+                    raise ControllerError("Проверка шагов прервана; привязка потеряна")
+            return details
+        finally:
+            self._home_active = False
+            self._home_cancel.clear()
 
     async def wait_idle(self) -> dict[str, float]:
         """Block until queued motion completes, then read settled position."""
@@ -504,6 +967,21 @@ class GcodeSender:
         }
         if result.position:
             self._motion.update_position(result.position)
+        expected, self._expected = self._expected, {}
+        mismatched = [a for a, target in expected.items()
+                      if a not in (result.position or {})
+                      or not math.isfinite(result.position[a])
+                      or abs(result.position[a] - target) > 0.02]
+        if mismatched:
+            self.manual_session = None
+            self._motion.invalidate(list(expected))
+            raise ControllerError(
+                "Контроллер не подтвердил целевую координату: "
+                + "; ".join(f"{a}: задано {expected[a]:.3f}, ответ {(result.position or {}).get(a)}" for a in mismatched)
+                + ". Проверьте ограничения прошивки; движение не считается выполненным."
+            )
+        if expected and not self.manual_session:
+            await self._check_manual_endstops(list(expected))
         return self._motion.positions
 
     async def read_endstops(self) -> dict[str, bool]:
@@ -512,7 +990,7 @@ class GcodeSender:
 
     async def read_diagnostic(self, command: str) -> CommandResult:
         """Run an allow-listed read-only Marlin diagnostic command."""
-        if command not in {"M114", "M119", "M503", "M122", "M105"}:
+        if command not in {"M114", "M119", "M503", "M122", "M105", "M211"}:
             raise ValueError(f"unsafe diagnostic command: {command}")
         result = await self._q.send(command, timeout=self._timeouts.diagnostics)
         if result.position:

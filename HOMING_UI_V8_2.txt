@@ -1,0 +1,10 @@
+FlowEngine v8.2 — calibration axis switching + async Home UI
+
+- Calibration X/Y now has explicit X/Y tabs.
+- Switching axes is allowed whenever motion is stopped; the initial free-space checkbox no longer acts as a hidden lock after /begin.
+- Unsaved per-axis drafts remain in the active calibration session.
+- Browser Home no longer keeps one POST request open for the entire physical homing travel.
+- New API: POST /api/home/start and GET /api/home/status?job_id=...
+- UI receives a home job id immediately and polls live phase/result status.
+- Existing POST /api/home remains for backward compatibility and tests.
+- Home cancel remains available while the background home job runs.

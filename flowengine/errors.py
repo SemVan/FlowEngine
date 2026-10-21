@@ -33,8 +33,8 @@ class StateError(FlowEngineError):
     """Operation attempted from an illegal state-machine state."""
 
 
-class SoftLimitError(FlowEngineError):
-    """A motion request would exceed the configured soft limits."""
+class MotionValidationError(FlowEngineError):
+    """неверный запрос движения или нет привязки к HOME"""
 
 
 class ConfigError(FlowEngineError):

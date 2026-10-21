@@ -1,0 +1,56 @@
+FLOWENGINE — PHYSICAL X/Y HOMING V6
+
+What changed
+============
+
+X/Y Home is now based on the physical calibration made with the two parallel
+endstops. For calibrated X/Y it does NOT call blind G28.
+
+Sequence:
+  1. Read M114 + M119.
+  2. Fast seek toward the configured physical home side (default: motor).
+  3. On physical contact, release the switch and back off.
+  4. Slow re-touch (latch) of the same switch.
+  5. Assign the absolute logical coordinate with G92.
+  6. Pull off again until the switch is OPEN.
+  7. Mark the axis REFERENCED.
+
+Coordinate convention
+=====================
+
+The measured physical stroke is used to assign logical coordinates 0..travel.
+This is NOT a host-side safe range and it is NOT used to block motion.
+
+If + moves toward the motor:
+  far switch   = 0
+  motor switch = travel
+
+If - moves toward the motor:
+  motor switch = 0
+  far switch   = travel
+
+Reference lifecycle
+===================
+
+Calibration (directions, physical travel, home_side) is persistent machine data.
+Reference is runtime state only.
+
+Reconnect / STOP / disabling motors => reference is lost.
+The axis becomes CALIBRATED_UNREFERENCED and must Home again before normal Jog/Move.
+
+An endstop active immediately after process startup is SIDE UNKNOWN because the two
+physical switches are wired in parallel. FlowEngine refuses to guess the side.
+Release it using the commissioning/calibration controls, then run Home.
+
+Future step-loss check
+======================
+
+Home stores the Marlin Count at the precise latch. This is deliberately retained
+as the baseline for the planned repeated-endstop step-loss verification.
+
+Installation note
+=================
+
+This update ZIP intentionally excludes personal-data/ and .venv/.
+Extract it OVER the current FlowEngine-Personal folder so your saved calibration
+and local Python environment are preserved.

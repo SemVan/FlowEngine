@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel" style="max-width:1100px;margin:1rem auto">
+  <h2>Valves · Краны</h2>
+  <p>Один общий концевик, один движущийся мотор. HOME — точка касания; после Home кран отходит до OPEN.</p>
+  <p id="valve-signal" role="status" style="font-size:1.3rem">Shared valve endstop: UNKNOWN</p>
+  <p id="valve-job" role="status" aria-live="polite"></p>
+  <p id="valve-message" role="alert"></p>
+  <button type="button" id="valve-home-all">Home All Valves · последовательно</button>
+  <a href="#valve-service" id="valve-release-link" hidden>Освободить концевик клапанов · SOURCE UNKNOWN</a>
+  <div id="valve-cards"></div>
+  <details id="valve-setup">
+    <summary>Настройка общего Z-входа и направлений</summary>
+    <p>Нажмите «Прочитать M119», затем вручную нажмите и отпустите микрик одного крана и прочитайте M119 снова.
+       Выберите имя входа, который меняется OPEN → TRIGGERED → OPEN. Сохранение настроек сбрасывает reference и требует калибровки A/B.</p>
+    <button type="button" id="valve-inputs">Прочитать M119 · без движения</button>
+    <pre id="valve-input-list"></pre>
+    <label>Общий endstop-канал <select id="valve-channel"><option value="">Выберите вход M119</option></select></label>
+    <div id="valve-settings"></div>
+    <button type="button" id="valve-save-config">Сохранить настройки</button>
+  </details>
+  <details id="valve-service">
+    <summary>Освободить концевик клапанов · сервисный режим</summary>
+    <p>При TRIGGERED источник неизвестен. Выберите один конкретный мотор и двигайте короткими шагами.
+       При появлении OPEN мотор остановится. После каждого сервисного шага отправляется M18 только выбранной оси для снятия удержания.
+       При ошибке или STOP отключение запрашивается без подтверждения; при обрыве связи состояние питания неизвестно.
+       Сервисное движение сбрасывает reference всех кранов.</p>
+    <label>Кран <select id="valve-service-name"></select></label>
+    <label>Короткий шаг, единицы оси · максимум 0,5 <input id="valve-service-step" type="number" value="0.1" min="0.001" max="0.5" step="0.01"></label>
+    <button type="button" data-service="-1">Выбранный мотор −</button>
+    <button type="button" data-service="1">Выбранный мотор +</button>
+  </details>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="/static/js/valves.js"></script>{% endblock %}

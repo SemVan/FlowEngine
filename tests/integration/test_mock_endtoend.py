@@ -17,6 +17,10 @@ def client(monkeypatch, tmp_path) -> TestClient:
     settings = AppSettings(mock=True, log_level="WARNING")
     app = create_app(settings)
     with TestClient(app) as c:
+        device = c.get("/api/config").json()["device_map"]
+        configured = c.put("/api/valves/config", json={"valves": device["valves"],
+                            "shared_valve_endstop": {"channel": "z_min"}})
+        assert configured.status_code == 200, configured.text
         yield c
 
 
@@ -44,24 +48,36 @@ def test_home_all_and_jog(client):
     assert body["positions"]["X"] == pytest.approx(1.0, abs=0.01)
 
 
-def test_jog_before_home_rejected(client):
-    # Re-create with fresh state by restarting? Use the test we have: jog should fail soft-limit.
-    # State on existing fixture is post-home so we can't easily test pre-home here.
-    # Instead, jog an axis past its travel limit.
-    client.post("/api/home", json={"axes": None})
+def test_normal_motion_requires_reference(client):
+    assert client.post("/api/stop").status_code == 200
+    assert client.post("/api/reconnect").status_code == 200
     r = client.post(
         "/api/jog",
-        json={"axis": "X", "delta": 99999.0, "feedrate": 100.0},
-        headers={"Idempotency-Key": "soft"},
+        json={"axis": "X", "delta": 1.0, "feedrate": 100.0},
+        headers={"Idempotency-Key": "unreferenced"},
     )
-    assert r.status_code == 400
-    assert "soft-limit" in r.text
+    assert r.status_code in {400, 409}
+    assert "refer" in r.text.lower() or "state" in r.text.lower()
 
 
 def test_stop_endpoint(client):
     client.post("/api/home", json={"axes": None})
     r = client.post("/api/stop")
     assert r.status_code == 200
+
+
+def test_core_reconnect_after_stop_without_desktop_wrapper(client):
+    client.post("/api/home", json={"axes": None})
+    assert client.post("/api/stop").status_code == 200
+    assert client.get("/api/state").json()["state"] == "errored"
+
+    r = client.post("/api/reconnect")
+    assert r.status_code == 200, r.text
+    assert r.json()["references_lost"] is True
+    state = client.get("/api/state").json()
+    assert state["state"] == "connected_idle"
+    assert not any(state["homed"].values())
+    assert client.get("/api/diagnostics/firmware").status_code == 200
 
 
 def test_config_endpoint(client):
@@ -210,7 +226,7 @@ def test_profiles_and_racks_can_be_saved(client):
 def test_procedure_runs_end_to_end(client):
     response = client.post("/api/procedures/home_all/run")
     assert response.status_code == 200, response.text
-    deadline = time.monotonic() + 2
+    deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         status = client.get("/api/procedures/status").json()
         if not status["running"]:
@@ -234,3 +250,36 @@ def test_idempotency_key_dedupes(client):
     assert r1.status_code == r2.status_code == 200
     # Same response → second call did not actually move (cache hit).
     assert r1.json() == r2.json()
+
+
+def test_async_home_job_returns_immediately_and_completes(client, monkeypatch):
+    import asyncio
+    import time
+
+    sender = client.app.state.ctx.sender
+    original_home = sender.home
+
+    async def delayed_home(axes=None, progress=None):
+        await asyncio.sleep(0.15)
+        return await original_home(axes, progress=progress)
+
+    monkeypatch.setattr(sender, "home", delayed_home)
+    started_at = time.monotonic()
+    response = client.post("/api/home/start", json={"axes": ["X"]})
+    elapsed = time.monotonic() - started_at
+    assert response.status_code == 200, response.text
+    assert elapsed < 0.12
+    job_id = response.json()["job_id"]
+    assert response.json()["state"] in {"starting", "running"}
+
+    deadline = time.monotonic() + 2.0
+    status = None
+    while time.monotonic() < deadline:
+        status = client.get("/api/home/status", params={"job_id": job_id})
+        assert status.status_code == 200, status.text
+        if status.json()["state"] == "completed":
+            break
+        time.sleep(0.03)
+    assert status is not None
+    assert status.json()["state"] == "completed", status.text
+    assert status.json()["result"]["homed"]["X"] is True

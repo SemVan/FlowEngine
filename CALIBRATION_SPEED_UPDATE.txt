@@ -1,0 +1,11 @@
+FlowEngine X/Y calibration speed update
+
+- No host safe-range was reintroduced. Physical parallel endstops remain the X/Y boundary source.
+- M211 software limits are disabled once for an exclusive calibration hold and restored when the hold ends.
+- Coarse seek uses 0.5-2.0 mm completed segments (scaled with seek speed) instead of fixed 0.25 mm segments.
+- First endstop hit is coarse only. FlowEngine automatically clears the switch, backs off, and re-touches slowly in 0.05 mm segments.
+- UI has per-axis seek feedrate, latch feedrate, and backoff distance controls.
+- Those three values are persisted in axis_calibration for future Home/Reference reuse.
+- Ordinary button release still does not use M410. Emergency STOP remains M410/reconnect behavior.
+
+Tests: axis calibration 4/4 pass; full suite 101 pass, with the same 4 pre-existing Marlin resync/default-port failures.

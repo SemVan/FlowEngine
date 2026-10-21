@@ -1,0 +1,11 @@
+FlowEngine fixed build v5
+- Marlin resend recovery
+- portable Windows launchers
+- commissioning jog without homing/endstops
+- fixed JSON Content-Type preservation for jog/move Idempotency-Key requests
+
+v6:
+- unhomed commissioning Jog no longer has a ±1.000-per-click distance limit
+- config/runtime.yaml uses unhomed_jog_step_cap: 0.0 (disabled)
+- unhomed Jog remains relative-only (G91) until homed
+- unhomed commissioning feedrate cap remains active

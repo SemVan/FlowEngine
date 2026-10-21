@@ -12,6 +12,7 @@ from flowengine.api.deps import AppContext, get_ctx
 from flowengine.api.router_diagnostics import state as state_snapshot
 from flowengine.api.router_motion import _require_motion_enabled, _wrap_errors
 from flowengine.calibration import PumpMeasurement, calibrate_pump, reference_error
+from flowengine.errors import StateError
 from flowengine.logging_setup import audit
 from flowengine.state import State
 
@@ -85,7 +86,7 @@ async def capabilities(ctx: Context):
             "Configured capabilities still require bench verification.",
             "Shared-input G28 is blocked; use verified firmware-stopped seek.",
             "Position counters are not encoder feedback.",
-            "Serial Stop is not a physical emergency stop; restart after Stop.",
+            "Serial Stop is not a physical emergency stop; reconnect after physical stop. References are lost.",
             "Raw ADC and per-axis enable depend on firmware and wiring.",
         ],
     }
@@ -128,12 +129,17 @@ async def console(body: RawRequest, ctx: Context):
 async def motors(body: MotorsRequest, ctx: Context):
     _require_motion_enabled(ctx)
     ctx.state.require(State.CONNECTED_IDLE)
+    epoch = ctx.sender.reference_epoch
     await ctx.state.transition(State.MOVING, detail="motor enable/disable")
     try:
         await ctx.sender.motors(body.enabled, body.axes)
+        if epoch != ctx.sender.reference_epoch:
+            raise StateError("motor control interrupted by Stop; reconnect before continuing")
+        ctx.state.require(State.MOVING)
     except Exception:
         ctx.motion.invalidate()
-        await ctx.state.transition(State.ERRORED, detail="motor control failed")
+        if epoch == ctx.sender.reference_epoch and ctx.state.state == State.MOVING:
+            await ctx.state.transition(State.ERRORED, detail="motor control failed")
         raise
     await ctx.state.transition(State.CONNECTED_IDLE, detail="motor control complete")
     audit("motors", enabled=body.enabled, axes=body.axes)

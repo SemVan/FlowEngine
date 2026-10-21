@@ -165,6 +165,11 @@ class SetValveStep(_Step):
     position: Literal["A", "B"]
 
 
+class HomeValveStep(_Step):
+    op: Literal["home_valve"]
+    name: str
+
+
 class WaitPressureStep(_Step):
     """Phase 3. Loader accepts this in Phase 2; runner refuses to execute it."""
 
@@ -229,6 +234,7 @@ Step = Annotated[
     | DwellStep
     | SetParamStep
     | SetValveStep
+    | HomeValveStep
     | WaitPressureStep
     | LogStep
     | CheckpointStep

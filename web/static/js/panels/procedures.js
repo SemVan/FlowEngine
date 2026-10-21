@@ -200,6 +200,8 @@ function renderStepFields() {
       <label>Displacement units<select id="step-units"><option value="axis">mm/deg</option><option value="steps">STEP pulses</option></select></label>
       <label>Speed units<select id="step-speed-units"><option value="axis/min">axis units/min</option><option value="axis/s">axis units/s</option><option value="steps/s">STEP pulses/s</option></select></label>
       ${inputField("Acceleration (optional, axis units/s²)", "step-accel")}`;
+  } else if (stepOp.value === "home_valve") {
+    stepFields.innerHTML = `<label>Valve<select id="step-valve">${optionList(valves)}</select></label>`;
   } else if (stepOp.value === "set_valve") {
     stepFields.innerHTML = `<label>Valve<select id="step-valve">${optionList(valves)}</select></label>
       <label>Position<select id="step-position"><option value="A">A / position 1</option><option value="B">B / position 2</option></select></label>`;
@@ -309,6 +311,7 @@ function buildStep() {
     return step;
   }
   if (stepOp.value === "set_valve") return { op: "set_valve", name: document.getElementById("step-valve").value, position: document.getElementById("step-position").value };
+  if (stepOp.value === "home_valve") return { op: "home_valve", name: document.getElementById("step-valve").value };
   if (stepOp.value === "home") {
     const axes = document.getElementById("step-axes").value.split(",").map((value) => value.trim()).filter(Boolean);
     return { op: "home", axes: axes.length ? axes : null };

@@ -1,9 +1,4 @@
-"""Valve abstraction — two-position 3-port driven by one axis.
-
-The software model owns "which side the valve is currently on." Wired-OR
-endstops cannot disambiguate, so we trust the configured `position_a` /
-`position_b` axis coordinates and the homing convention.
-"""
+"""старые данные крана для совместимости; движением управляет sender.valves"""
 
 from __future__ import annotations
 

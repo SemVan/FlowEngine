@@ -61,6 +61,9 @@ def save_yaml(kind: str, name: str, model: BaseModel) -> Path:
 def load_yaml(path: Path, model: type[T]) -> T:
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        if model.__name__ == "ConfigurationProfile":
+            from flowengine.profile_migration import migrate_configuration_profile_data
+            data = migrate_configuration_profile_data(data)
         return model.model_validate(data)
     except Exception as exc:
         raise ConfigError(f"invalid {model.__name__} in {path.name}: {exc}") from exc

@@ -34,6 +34,10 @@ class StateResponse(BaseModel):
     detail: str
     positions: dict[str, float]
     homed: dict[str, bool]
+    calibrated: dict[str, bool]
+    reference_status: dict[str, Literal["uncalibrated", "calibrated_unreferenced", "referenced"]]
+    reference_counts: dict[str, int] = Field(default_factory=dict)
+    reference_sides: dict[str, str] = Field(default_factory=dict)
     queue_depth: int
     firmware: str | None
     transport: Literal["marlin", "mock", "klipper"]

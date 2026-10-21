@@ -7,8 +7,10 @@ client); commands go via REST.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from contextlib import suppress
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -29,6 +31,9 @@ async def telemetry_ws(ws: WebSocket):
                 "type": "state",
                 "state": ctx.state.state.value,
                 "detail": ctx.state.detail,
+                "homed": ctx.motion.homed,
+                "reference_counts": ctx.sender.reference_counts,
+                "reference_sides": ctx.sender.reference_sides,
             }
         )
     )
@@ -42,12 +47,27 @@ async def telemetry_ws(ws: WebSocket):
         )
     )
     async with ctx.events.subscribe() as queue:
+        receive_task = asyncio.create_task(ws.receive())
+        event_task = asyncio.create_task(queue.get())
         try:
             while True:
-                msg = await queue.get()
-                await ws.send_text(json.dumps(msg))
-        except WebSocketDisconnect:
+                done, _ = await asyncio.wait(
+                    {receive_task, event_task}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if receive_task in done:
+                    if receive_task.result()["type"] == "websocket.disconnect":
+                        return
+                    receive_task = asyncio.create_task(ws.receive())
+                if event_task in done:
+                    await ws.send_text(json.dumps(event_task.result()))
+                    event_task = asyncio.create_task(queue.get())
+        except (WebSocketDisconnect, asyncio.CancelledError):
             return
         except Exception:  # noqa: BLE001
             log.exception("ws telemetry loop crashed")
             return
+        finally:
+            receive_task.cancel()
+            event_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await asyncio.gather(receive_task, event_task, return_exceptions=True)

@@ -23,6 +23,9 @@ class EndstopHoming(HomingStrategy):
 
     async def home(self, queue, axes: list[str] | None) -> list[str]:
         targets = axes or [a.marlin_axis for a in self._map.axes]
+        if any(self._map.axis(ax).kind == "valve" or any(v.axis == ax for v in self._map.valves)
+               for ax in targets):
+            raise ValueError("Valve G28 is disabled; use the shared-endstop ValveSubsystem")
         # Marlin only knows X/Y/Z directly for G28; E axes home via different mechanisms.
         # For fluidics, we issue G28 per axis letter, then track ourselves.
         for ax in targets:
