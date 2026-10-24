@@ -78,6 +78,15 @@ class CommandQueue:
     def depth(self) -> int:
         return self._depth
 
+    @property
+    def faulted(self) -> bool:
+        return self._aborted.is_set()
+
+    def configure_default_timeout(self, timeout: float) -> None:
+        if self._depth or timeout <= 0:
+            raise ValueError("positive timeout and idle queue required")
+        self._default_timeout = timeout
+
     async def send(self, gcode: str, *, timeout: float | None = None) -> CommandResult:
         """Send a single G-code line. Returns when `ok` arrives or timeout/error fires."""
         if self._aborted.is_set():

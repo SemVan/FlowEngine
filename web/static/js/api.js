@@ -87,6 +87,14 @@ export const api = {
     return request("/api/home", { method: "POST", body: JSON.stringify({ axes }) });
   },
   stop() { return request("/api/stop", { method: "POST" }); },
+  valves() { return request("/api/valves"); },
+  valveEndstop(channel) { return request(`/api/valves/endstop/${encodeURIComponent(channel)}`); },
+  valveServiceJog(body) {
+    return request("/api/valves/service-jog", { method: "POST", body: JSON.stringify(body) });
+  },
+  valveHome(body) {
+    return request("/api/valves/home", { method: "POST", body: JSON.stringify(body) });
+  },
   procedures() { return request("/api/procedures"); },
   procedure(name) { return request(`/api/procedures/${encodeURIComponent(name)}`); },
   saveProcedure(name, procedure) {

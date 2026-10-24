@@ -7,11 +7,19 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from flowengine.api.deps import AppContext, get_ctx
-from flowengine.errors import TransportError
+from flowengine.errors import ControllerError, TransportError
 from flowengine.schemas import DiagnosticResponse, EndstopsSnapshot, FirmwareInfo, StateResponse
+from flowengine.state import State
 
 router = APIRouter(prefix="/api", tags=["diagnostics"])
 Context = Annotated[AppContext, Depends(get_ctx)]
+
+
+async def diagnostic_failure(ctx, exc):
+    ctx.motion.invalidate()
+    if ctx.state.state != State.DISCONNECTED:
+        await ctx.state.transition(State.ERRORED, detail=f"diagnostic link failure: {exc}")
+    return HTTPException(status_code=503, detail=str(exc))
 
 
 @router.get("/state", response_model=StateResponse)
@@ -36,8 +44,8 @@ async def state(ctx: Context):
 async def firmware(ctx: Context):
     try:
         raw, caps = await ctx.sender.read_firmware()
-    except TransportError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
+    except (TransportError, ControllerError) as e:
+        raise await diagnostic_failure(ctx, e) from e
     return FirmwareInfo(raw=raw, flavor=ctx.runtime.firmware.flavor, features=sorted(caps))
 
 
@@ -45,8 +53,8 @@ async def firmware(ctx: Context):
 async def endstops(ctx: Context):
     try:
         result = await ctx.sender.read_diagnostic("M119")
-    except TransportError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
+    except (TransportError, ControllerError) as e:
+        raise await diagnostic_failure(ctx, e) from e
     return EndstopsSnapshot(triggered=result.endstops or {}, raw="\n".join(result.raw))
 
 
@@ -68,6 +76,6 @@ async def drivers(ctx: Context):
 async def _diagnostic(ctx: AppContext, command: str) -> DiagnosticResponse:
     try:
         result = await ctx.sender.read_diagnostic(command)
-    except TransportError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
+    except (TransportError, ControllerError) as e:
+        raise await diagnostic_failure(ctx, e) from e
     return DiagnosticResponse(command=command, raw=result.raw, positions=result.position)

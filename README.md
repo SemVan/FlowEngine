@@ -2,6 +2,11 @@
 
 Control software for a flow cytometer's fluidics tract.
 
+Для наладки реального прибора коллегой начните с
+[пошаговой инструкции проверок, калибровок и передачи конфигов](docs/COLLEAGUE_COMMISSIONING.md).
+Страница **Наладка** (`/commissioning`) сохраняет исходные измерения, журнал,
+калибровки и экспортируемый комплект профиля с процедурами.
+
 - Python 3.11+ backend (FastAPI + asyncio + pyserial).
 - Vanilla-JS web frontend (no npm, no build step).
 - Targets the **MKS Monster8 MK2** stepper-driver board, flashed with Marlin, over USB-CDC G-code.
@@ -81,6 +86,7 @@ limits, and endstop polarity.
 | `docs/TEST_REPORT.md` | Verification performed for the developer-workbench changes |
 | `docs/ROADMAP.md` | Phases 1 / 2 / 3 and what each adds |
 | `docs/STEPSKIP.md` | Phase 3 step-skipping test design |
+| `docs/VALVE_BENCH_TEST.md` | Safe first one-valve commissioning sequence |
 
 ## Current status
 
@@ -92,7 +98,7 @@ limits, and endstop polarity.
 - Motion interlock plus homing and software travel limits.
 - REST endpoints for jog / move / home / stop / diagnostics; WebSocket telemetry.
 - Read-only `M115`, `M114`, `M119`, `M503`, and `M122` diagnostics in the web UI.
-- YAML procedure execution for homing, moves, valve positions, dwell, and logging.
+- YAML procedure execution for sequential shared-input valve homing, named valve positions, calibrated pumps, nested calls and bounded repeats.
 - Developer procedure workbench: validated drafts, typed parameters, visual step builder,
   dry preview, and deliberate one-step-at-a-time commissioning.
 - Saved configuration profiles and editable 8×12 autosampler rack geometry.
@@ -103,7 +109,7 @@ limits, and endstop polarity.
 - Coordinated multi-axis G1 and capability-gated probe calibration/reference-return procedures.
 - Editable shared endstop and analog input configuration; one-shot sensor reports.
 
-Mode switching, live fluidics visualization, pressure feedback, variable loops,
+Mode switching, live fluidics visualization, pressure feedback, conditional control flow,
 and multi-controller support are not implemented yet. The Fluidics diagram is a
 draft, not a verified tubing diagram.
 

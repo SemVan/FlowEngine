@@ -54,6 +54,15 @@ class MotionRequest(Request):
     acceleration: float | None = Field(default=None, gt=0)
 
 
+class ServiceJogRequest(Request):
+    axis: str
+    channel: str = Field(pattern=r"^[A-Za-z0-9_]+$")
+    delta: float
+    feedrate: float = 30.0
+    release_motor: bool = True
+    confirmed: bool = False
+
+
 class PumpCalibration(Request):
     name: str
     measurements: list[PumpMeasurement] = Field(min_length=1)
@@ -126,7 +135,11 @@ async def console(body: RawRequest, ctx: Context):
 @router.post("/motors")
 @_wrap_errors
 async def motors(body: MotorsRequest, ctx: Context):
-    _require_motion_enabled(ctx)
+    # Releasing selected drivers is a safe recovery/commissioning action even
+    # while normal motion remains interlocked. Enabling them still requires the
+    # verified-motion opt-in.
+    if body.enabled:
+        _require_motion_enabled(ctx)
     ctx.state.require(State.CONNECTED_IDLE)
     await ctx.state.transition(State.MOVING, detail="motor enable/disable")
     try:
@@ -142,6 +155,39 @@ async def motors(body: MotorsRequest, ctx: Context):
         "homed": ctx.motion.homed,
         "warning": "driver state is commanded, not electrically measured",
     }
+
+
+@router.post("/service-jog")
+@_wrap_errors
+async def service_jog(body: ServiceJogRequest, ctx: Context):
+    """One bounded unreferenced move for supervised hardware identification."""
+    if not body.confirmed:
+        raise ValueError("explicit confirmation is required for unreferenced service jog")
+    if ctx.runner.status["running"]:
+        raise ValueError("procedure is running; service jog is blocked")
+    ctx.state.require(State.CONNECTED_IDLE)
+    await ctx.state.transition(State.MOVING, detail=f"service jog {body.axis}")
+    try:
+        result = await ctx.sender.valve_commissioning.service_jog_axis(
+            body.axis,
+            body.delta,
+            body.feedrate,
+            body.channel,
+            release_motor=body.release_motor,
+        )
+    except Exception:
+        await ctx.state.transition(State.CONNECTED_IDLE, detail="service jog stopped; motor released")
+        raise
+    motor_state = "released" if body.release_motor else "holding"
+    await ctx.state.transition(State.CONNECTED_IDLE, detail=f"service jog complete; motor {motor_state}")
+    audit(
+        "service_jog",
+        axis=body.axis,
+        delta=body.delta,
+        channel=body.channel,
+        release_motor=body.release_motor,
+    )
+    return result
 
 
 @router.post("/jog")

@@ -28,6 +28,7 @@ class _Step(BaseModel):
             "volume_ul",
             "flow_ul_min",
             "search_distance",
+            "release_distance",
             "backoff",
             "reference_feedrate",
         ):
@@ -142,6 +143,26 @@ class HomeStep(_Step):
     axes: list[str] | None = Field(default=None, description="None = home all axes.")
 
 
+class RequireReferenceStep(_Step):
+    op: Literal["require_reference"]
+    axes: list[str] = Field(min_length=1)
+
+
+class HomeValveStep(_Step):
+    """Home one valve against its only switch on a shared input."""
+
+    op: Literal["home_valve"]
+    name: str
+    channel: str
+    direction: Literal[-1, 1] | ParameterReference
+    step: NumberValue = 0.25
+    feedrate: NumberValue = 30.0
+    search_distance: NumberValue
+    release_distance: NumberValue | None = None
+    pull_off: NumberValue = 0.5
+    release_motor: bool = False
+
+
 class DwellStep(_Step):
     op: Literal["dwell"]
     seconds: NumberValue
@@ -162,7 +183,9 @@ class SetParamStep(_Step):
 class SetValveStep(_Step):
     op: Literal["set_valve"]
     name: str
-    position: Literal["A", "B"]
+    position: str = Field(min_length=1)
+    feedrate: NumberValue | None = None
+    acceleration: NumberValue | None = None
 
 
 class WaitPressureStep(_Step):
@@ -192,6 +215,21 @@ class CallStep(_Step):
     op: Literal["call"]
     procedure: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
     parameters: dict[str, float | int | str | bool] = Field(default_factory=dict)
+
+
+class RepeatStep(_Step):
+    """Repeat a reusable named procedure a bounded number of times."""
+
+    op: Literal["repeat"]
+    procedure: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+    times: int | ParameterReference
+    parameters: dict[str, float | int | str | bool] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def bounded_times(self):
+        if isinstance(self.times, int) and not 1 <= self.times <= 1000:
+            raise ValueError("repeat times must be between 1 and 1000")
+        return self
 
 
 class ProcedureParameter(BaseModel):
@@ -226,6 +264,8 @@ Step = Annotated[
     MoveStep
     | MoveMultiStep
     | HomeStep
+    | RequireReferenceStep
+    | HomeValveStep
     | DwellStep
     | SetParamStep
     | SetValveStep
@@ -239,7 +279,8 @@ Step = Annotated[
     | SeekStep
     | ValveCalibrationStep
     | ReferenceTestStep
-    | CallStep,
+    | CallStep
+    | RepeatStep,
     Field(discriminator="op"),
 ]
 

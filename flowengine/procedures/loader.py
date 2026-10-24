@@ -14,6 +14,7 @@ from flowengine.loaders import load_procedure
 from flowengine.schemas import (
     DeviceMap,
     HomeStep,
+    HomeValveStep,
     MoveMultiStep,
     MoveStep,
     Procedure,
@@ -42,6 +43,23 @@ def lint(proc: Procedure, dm: DeviceMap) -> list[str]:
         elif isinstance(step, SetValveStep):
             if step.name not in known_valves:
                 issues.append(f"step {i}: unknown valve {step.name!r}")
+            else:
+                valve = next(v for v in dm.valves if v.name == step.name)
+                try:
+                    valve.position(step.position)
+                except ValueError as exc:
+                    issues.append(f"step {i}: {exc}")
+        elif isinstance(step, HomeValveStep):
+            if step.name not in known_valves:
+                issues.append(f"step {i}: unknown valve {step.name!r}")
+            elif not any(
+                group.channel == step.channel
+                and next(v for v in dm.valves if v.name == step.name).axis in group.axes
+                for group in dm.endstop_inputs
+            ):
+                issues.append(
+                    f"step {i}: valve {step.name!r} is not mapped to endstop {step.channel!r}"
+                )
     return issues
 
 

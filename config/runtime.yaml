@@ -15,7 +15,7 @@ timeouts:
   ok_default: 5.0
   move: 30.0
   homing: 60.0
-  diagnostics: 3.0
+  diagnostics: 10.0
 
 motion:
   feedrate_cap: 3000.0

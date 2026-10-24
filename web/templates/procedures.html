@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
+<p>Run parameters apply to this launch only. To keep them after reopening, use “Save run parameters as defaults”.</p>
+<button id="save-run-defaults" type="button">Save run parameters as defaults</button>
 <section class="panel">
   <h2>Procedure workbench</h2>
   <p class="phase-note">Drafts can be saved and previewed. A developer may deliberately run one selected step while commissioning hardware; a complete draft can never run.</p>
@@ -28,17 +30,20 @@
         <option value="move">Move one axis</option>
         <option value="set_valve">Set valve position</option>
         <option value="home">Home axes</option>
+        <option value="home_valve">Home one valve on shared input</option>
+        <option value="require_reference">Require referenced axes (no movement)</option>
         <option value="dwell">Wait</option>
         <option value="log">Log message</option>
         <option value="checkpoint">Checkpoint</option>
         <option value="call">Call another procedure</option>
+        <option value="repeat">Repeat another procedure</option>
         <option value="move_multi">Move several axes</option>
         <option value="pump">Pump volume</option>
         <option value="pump_multi">Coordinated pump volumes / flows</option>
         <option value="motors">Enable / release motors</option>
         <option value="read_sensors">Read sensors</option>
         <option value="seek">Verified probe contact search</option>
-        <option value="calibrate_valve">Measure valve endpoint distance</option>
+        <option value="calibrate_valve">Legacy two-switch span measurement</option>
         <option value="test_reference">Check return-to-reference error</option>
       </select>
     </label>

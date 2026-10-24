@@ -33,10 +33,11 @@ axes:
     steps_per_unit: 80.0
     units: mm
     travel: 9.42227
-    home_direction: max
+    home_direction: min
     feedrate_default: 600.0
     feedrate_max: 1200.0
-    notes: "Logical A, physical DRIVER3 / E0 socket."
+    endstop_channels_shared: false
+    notes: "Logical A, physical DRIVER3 / E0 socket. Bench-confirmed: negative motion approaches its single home switch on shared z_min."
 
   - marlin_axis: B
     name: sheath_valve_axis
@@ -44,10 +45,11 @@ axes:
     steps_per_unit: 80.0
     units: mm
     travel: 12.81382
-    home_direction: max
+    home_direction: min
     feedrate_default: 600.0
     feedrate_max: 1200.0
-    notes: "Logical B, physical DRIVER4 / E1 socket."
+    endstop_channels_shared: false
+    notes: "Logical B, physical DRIVER4 / E1 socket. Negative HOME confirmed on shared z_min. Travel remains provisional."
 
   - marlin_axis: C
     name: sample_valve_axis
@@ -55,10 +57,11 @@ axes:
     steps_per_unit: 80.0
     units: mm
     travel: 10.1065
-    home_direction: max
+    home_direction: min
     feedrate_default: 600.0
     feedrate_max: 1200.0
-    notes: "Logical C, physical DRIVER5 / E2 socket."
+    endstop_channels_shared: false
+    notes: "Logical C, physical DRIVER5 / E2 socket. Negative HOME confirmed on shared z_min. Travel remains provisional; observed release position reached 11 units."
 
   - marlin_axis: U
     name: wash_peristaltic
@@ -76,18 +79,39 @@ valves:
   - name: wash_valve
     axis: A
     position_a: 0.0
-    position_b: -9.42227
+    position_b: 9.42227
     home_position: A
+    calibrated: false
+    calibration_notes: "Home direction is confirmed; both working coordinates are still placeholders."
+    position_names:
+      "КП-ПРОКАЧКА": A
+      "КП-ПРОМЫВКА": B
   - name: sheath_valve
     axis: B
     position_a: 0.0
-    position_b: -12.81382
+    position_b: 12.81382
     home_position: A
+    calibrated: false
+    calibration_notes: "Home direction and both working coordinates require bench commissioning."
+    position_names:
+      "КО-ПРОКАЧКА": A
+      "КО-ЗАБОР": B
   - name: sample_valve
     axis: C
     position_a: 0.0
-    position_b: -10.1065
+    position_b: 10.1065
     home_position: A
+    calibrated: false
+    calibration_notes: "Home direction and both working coordinates require bench commissioning."
+    position_names:
+      "КС-ПРОКАЧКА": A
+      "КС-ЗАБОР": B
+
+endstop_inputs:
+  - channel: z_min
+    axes: [A, B, C]
+    active_high: true
+    notes: "One home switch per valve; three switches are wired in parallel. Home valves strictly one at a time."
 
 pumps:
   - name: sample_pump

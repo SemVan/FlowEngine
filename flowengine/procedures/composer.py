@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from flowengine.errors import ProcedureError
-from flowengine.schemas import CallStep, Procedure, Step
+from flowengine.schemas import CallStep, Procedure, RepeatStep, Step
 
 ProcedureLoader = Callable[[str], Procedure]
 
@@ -24,8 +24,9 @@ def expand_procedure(
     *,
     allow_draft: bool = False,
     max_depth: int = 8,
+    max_steps: int = 10_000,
 ) -> ExpandedProcedure:
-    """Resolve and flatten `call` steps while retaining a readable source path."""
+    """Resolve and flatten calls/repeats while retaining a readable source path."""
     steps: list[Step] = []
     paths: list[str] = []
 
@@ -49,9 +50,20 @@ def expand_procedure(
             if isinstance(step, CallStep):
                 child = loader(step.procedure)
                 visit(child, step.parameters, next_stack, location)
+            elif isinstance(step, RepeatStep):
+                child = loader(step.procedure)
+                for iteration in range(1, step.times + 1):
+                    visit(
+                        child,
+                        step.parameters,
+                        next_stack,
+                        (*location, f"repeat {iteration}/{step.times}"),
+                    )
             else:
                 steps.append(step)
                 paths.append(" → ".join(location))
+                if len(steps) > max_steps:
+                    raise ProcedureError(f"expanded procedure exceeds {max_steps} steps")
 
     visit(source, parameters, (), ())
     flattened = Procedure(

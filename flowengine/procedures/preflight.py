@@ -11,8 +11,10 @@ from flowengine.schemas.procedure import (
     PumpMultiStep,
     PumpStep,
     ReferenceTestStep,
+    RequireReferenceStep,
     SeekStep,
     SetParamStep,
+    SetValveStep,
     ValveCalibrationStep,
     WaitPressureStep,
 )
@@ -25,6 +27,10 @@ def execution_issues(procedure: Procedure, device: DeviceMap, runtime: RuntimePa
         prefix = f"step {index}: "
         if isinstance(step, (SetParamStep, WaitPressureStep)):
             issues.append(prefix + f"{step.op} is not implemented")
+        elif isinstance(step, SetValveStep):
+            valve = next((v for v in device.valves if v.name == step.name), None)
+            if valve is None or not valve.calibrated:
+                issues.append(prefix + "valve is unknown or its working positions are uncalibrated")
         elif isinstance(step, PumpStep):
             pump = next((p for p in device.pumps if p.name == step.name), None)
             if pump is None or not pump.calibrated:
@@ -45,6 +51,9 @@ def execution_issues(procedure: Procedure, device: DeviceMap, runtime: RuntimePa
                 issues.append(
                     prefix + "firmware-stopped probe search is not bench-verified for axis/channel"
                 )
+        elif isinstance(step, RequireReferenceStep):
+            if not set(step.axes) <= known:
+                issues.append(prefix + "unknown reference axis")
         elif isinstance(step, HomeStep):
             axes = step.axes if step.axes is not None else list(known)
             for axis in axes:

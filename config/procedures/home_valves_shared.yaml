@@ -1,0 +1,20 @@
+name: home_valves_shared
+description: "DRAFT: home A, B and C sequentially through their single switches wired to z_min. Confirm B/C directions and search distances on the bench."
+version: 1
+draft: true
+parameters:
+  wash_direction: {type: integer, default: -1, minimum: -1, maximum: 1, description: "Bench-confirmed for A: -1 approaches its switch."}
+  sheath_direction: {type: integer, default: -1, minimum: -1, maximum: 1, description: "Bench-confirmed negative direction."}
+  sample_direction: {type: integer, default: -1, minimum: -1, maximum: 1, description: "Bench-confirmed negative direction."}
+  wash_search: {type: number, default: 9.0, minimum: 0.25, maximum: 9.42227}
+  sheath_search: {type: number, default: 12.0, minimum: 0.25, maximum: 12.81382}
+  sample_search: {type: number, default: 10.0, minimum: 0.25, maximum: 10.1065}
+  search_step: {type: number, default: 0.5, minimum: 0.1, maximum: 1.0}
+  release_distance: {type: number, default: 12, minimum: 0.1, maximum: 19.5, description: "Maximum automatic retreat before switch release, independent of search distance."}
+  home_feedrate: {type: number, default: 90.0, minimum: 1.0, maximum: 120.0}
+  pull_off: {type: number, default: 0.5, minimum: 0.1, maximum: 5.0}
+steps:
+  - {op: home_valve, name: wash_valve, channel: z_min, direction: "${wash_direction}", step: "${search_step}", feedrate: "${home_feedrate}", search_distance: "${wash_search}", pull_off: "${pull_off}", release_distance: "${release_distance}"}
+  - {op: home_valve, name: sheath_valve, channel: z_min, direction: "${sheath_direction}", step: "${search_step}", feedrate: "${home_feedrate}", search_distance: "${sheath_search}", pull_off: "${pull_off}", release_distance: "${release_distance}"}
+  - {op: home_valve, name: sample_valve, channel: z_min, direction: "${sample_direction}", step: "${search_step}", feedrate: "${home_feedrate}", search_distance: "${sample_search}", pull_off: "${pull_off}", release_distance: "${release_distance}"}
+  - {op: log, message: "all three valves referenced sequentially on z_min"}

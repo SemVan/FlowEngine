@@ -30,9 +30,8 @@ class DeviceKind(StrEnum):
 class AxisConfig(BaseModel):
     """One controller axis.
 
-    `endstop_channels_shared` documents that two physical switches (e.g. min+max
-    on a syringe) are wired-OR onto a single input. The controller cannot
-    distinguish which side fired, so soft limits in software are mandatory.
+    Cross-axis sharing of one physical controller input is described by
+    `DeviceMap.endstop_inputs`. Each valve may still have exactly one switch.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
@@ -51,7 +50,7 @@ class AxisConfig(BaseModel):
     dir_invert: bool = False
     endstop_channels_shared: bool = Field(
         default=True,
-        description="True if min+max endstops are wired-OR onto a single controller input.",
+        description="Legacy per-axis flag for multiple switches sharing one axis input.",
     )
     endstop_inverted: bool = False
     notes: str = ""
@@ -69,9 +68,9 @@ class AxisConfig(BaseModel):
 class ValveConfig(BaseModel):
     """A two-position valve driven by one axis.
 
-    `position_a` and `position_b` are axis positions (in axis units) where the
-    valve reaches each mechanical detent. After homing we trust the software
-    position model — wired-OR endstops can't tell us which side fired.
+    `position_a` and `position_b` are configured working positions relative to
+    the valve's single home switch. `position_names` gives those positions
+    domain names used by procedures, for example `wash` or `intake`.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
@@ -81,6 +80,18 @@ class ValveConfig(BaseModel):
     position_a: float
     position_b: float
     home_position: Literal["A", "B"] = "A"
+    position_names: dict[str, Literal["A", "B"]] = Field(default_factory=dict)
+    calibrated: bool = False
+    calibration_notes: str = ""
+
+
+    def position(self, name: str) -> float:
+        slot = name.upper() if name.upper() in {"A", "B"} else self.position_names.get(name)
+        if slot == "A":
+            return self.position_a
+        if slot == "B":
+            return self.position_b
+        raise ValueError(f"unknown position {name!r} for valve {self.name!r}")
 
 
 class PumpConfig(BaseModel):
@@ -102,6 +113,10 @@ class PumpConfig(BaseModel):
     dispense_direction: Literal[-1, 1] = 1
     calibrated: bool = False
     calibration_notes: str = ""
+    allowed_routes: dict[Literal["aspirate", "dispense"], dict[str, list[str]]] = Field(
+        default_factory=dict,
+        description="Required valve positions per pump direction; empty retains legacy unchecked routing.",
+    )
 
 
 class EndstopInput(BaseModel):
@@ -177,9 +192,21 @@ class DeviceMap(BaseModel):
         for v in self.valves:
             if v.axis not in axis_set:
                 raise ValueError(f"valve {v.name!r} references unknown axis {v.axis}")
+            if v.calibrated:
+                cfg = self.axis(v.axis)
+                lo, hi = (0, cfg.travel) if cfg.home_direction == "min" else (-cfg.travel, 0)
+                if v.position_a == v.position_b or not all(lo <= p <= hi for p in (v.position_a, v.position_b)):
+                    raise ValueError(f"calibrated valve {v.name}: distinct positions must fit axis travel")
         for p in self.pumps:
             if p.axis not in axis_set:
                 raise ValueError(f"pump {p.name!r} references unknown axis {p.axis}")
+            for route in p.allowed_routes.values():
+                for valve_name, positions in route.items():
+                    valve = next((v for v in self.valves if v.name == valve_name), None)
+                    if valve is None or not positions:
+                        raise ValueError(f"pump {p.name}: route must name known valves and positions")
+                    for position in positions:
+                        valve.position(position)
         if self.autosampler is not None:
             for slot in (
                 self.autosampler.x_axis,

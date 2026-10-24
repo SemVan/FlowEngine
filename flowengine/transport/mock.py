@@ -65,6 +65,7 @@ class MockTransport(Transport):
         self._steps_per_unit: dict[str, float] = defaultdict(lambda: 80.0)
         self._counts: dict[str, int] = defaultdict(int)
         self._acceleration = {"P": 3000.0, "R": 3000.0, "T": 3000.0}
+        self._soft_endstops = True
 
     async def open(self) -> None:
         self._closed = False
@@ -175,6 +176,16 @@ class MockTransport(Transport):
             return
         if p.startswith("M503"):
             await self._inbox.put("echo: M204 " + " ".join(f"{k}{v:.3f}" for k,v in self._acceleration.items()))
+            await self._inbox.put("ok")
+            return
+        if p == "M211":
+            await self._inbox.put(
+                f"echo:Soft endstops: {'ON' if self._soft_endstops else 'OFF'}"
+            )
+            await self._inbox.put("ok")
+            return
+        if p.startswith("M211 S"):
+            self._soft_endstops = "S1" in p
             await self._inbox.put("ok")
             return
         if p.startswith("M204"):

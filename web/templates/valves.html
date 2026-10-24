@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel valve-bench">
+  <h2>Valve bench commissioning</h2>
+  <p class="phase-note">
+    Developer tool for one disconnected-from-fluidics valve at a time. The search uses finite
+    steps and checks M119 after every step. Keep a physical power cut-off within reach.
+  </p>
+  <div class="valve-fields">
+    <label>Valve<select id="valve-name"></select></label>
+    <label>M119 channel<input id="valve-channel" value="probe" /></label>
+    <label>Direction toward switch<select id="valve-direction"><option value="1">+ (positive)</option><option value="-1">− (negative)</option></select></label>
+    <label>Step<input id="valve-step" type="number" min="0.01" max="0.25" step="0.01" value="0.10" /></label>
+    <label>Feedrate, units/min<input id="valve-feedrate" type="number" min="1" max="120" value="30" /></label>
+    <label>Service jog distance<input id="valve-jog-distance" type="number" min="0.1" max="20" step="0.1" value="1" /></label>
+    <label>Max search distance<input id="valve-distance" type="number" min="0.1" step="0.1" /></label>
+    <label>Max release distance<input id="valve-release-distance" type="number" min="0.1" max="19.5" step="0.1" value="12" /></label>
+    <label>Pull-off after switch release<input id="valve-pulloff" type="number" min="0.01" max="2" step="0.01" value="0.50" /></label>
+  </div>
+  <p><button id="valve-read">Read selected endstop</button> <strong id="valve-endstop">not read</strong></p>
+  <div class="valve-actions">
+    <button data-jog="-1">Service jog −</button>
+    <button data-jog="1">Service jog +</button>
+  </div>
+  <label class="danger-confirm"><input id="valve-confirm" type="checkbox" /> I checked the selected valve, direction, endstop input, low current and physical stop button.</label>
+  <div class="valve-actions">
+    <button id="valve-test-home" disabled>Test home and release motor</button>
+    <button id="valve-home" disabled>Home and keep referenced</button>
+  </div>
+  <pre id="valve-result">Load the page, select one valve, then read its endstop.</pre>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="/static/js/panels/valves.js"></script>{% endblock %}

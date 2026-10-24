@@ -19,7 +19,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
-from starlette.responses import HTMLResponse
+from starlette.responses import HTMLResponse, PlainTextResponse
 
 from flowengine.api import (
     config_router,
@@ -28,9 +28,11 @@ from flowengine.api import (
     motion_router,
     procedures_router,
     stepskip_router,
+    valves_router,
     ws_router,
 )
 from flowengine.api.deps import AppContext
+from flowengine.api.router_commissioning import router as commissioning_router
 from flowengine.api.router_workbench import router as workbench_router
 from flowengine.config import WEB_DIR, AppSettings
 from flowengine.config_store import find_saved, load_yaml
@@ -140,6 +142,17 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             runner=runner,
             profile_name=settings.profile,
         )
+        def persist_procedure(status):
+            from flowengine.commissioning import record
+            ctx = app.state.ctx
+            if ctx.profile_name == "default":
+                return
+            profile = load_yaml(find_saved("profiles", ctx.profile_name), ConfigurationProfile)
+            record(profile, "procedure_run", str(status["name"]),
+                   "Procedure execution result; physical observations belong in the check journal",
+                   {"status": status, "serial_trace": list(ctx.queue.trace)},
+                   passed=status["error"] is None)
+        runner.recorder = persist_procedure
         forwarder = asyncio.create_task(_forward_state_to_ws(state, events))
 
         try:
@@ -157,8 +170,10 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     app.include_router(procedures_router)
     app.include_router(modes_router)
     app.include_router(stepskip_router)
+    app.include_router(valves_router)
     app.include_router(ws_router)
     app.include_router(workbench_router)
+    app.include_router(commissioning_router)
 
     # Static + page routes
     app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")
@@ -192,6 +207,22 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     async def stepskip_page(request: Request):
         return templates.TemplateResponse(
             request=request, name="stepskip.html", context={"title": "Step-skip test"}
+        )
+
+    @app.get("/commissioning", response_class=HTMLResponse)
+    async def commissioning_page(request: Request):
+        return templates.TemplateResponse(
+            request=request, name="commissioning.html", context={"title": "Наладка прибора"}
+        )
+
+    @app.get("/commissioning/guide", response_class=PlainTextResponse)
+    async def commissioning_guide():
+        return (WEB_DIR.parent / "docs" / "COLLEAGUE_COMMISSIONING.md").read_text(encoding="utf-8")
+
+    @app.get("/valves", response_class=HTMLResponse)
+    async def valves_page(request: Request):
+        return templates.TemplateResponse(
+            request=request, name="valves.html", context={"title": "Valve commissioning"}
         )
 
     return app

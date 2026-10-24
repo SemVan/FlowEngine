@@ -17,6 +17,7 @@ from typing import Any
 from flowengine.hardware.homing.base import HomingStrategy
 from flowengine.hardware.motion import MotionModel
 from flowengine.hardware.queue import CommandQueue, CommandResult
+from flowengine.hardware.valve_commissioning import ValveCommissioning
 from flowengine.schemas.device import DeviceMap
 from flowengine.schemas.procedure import NumberValue, PumpDose
 from flowengine.schemas.runtime import FirmwareExpectation, Timeouts
@@ -45,6 +46,7 @@ class GcodeSender:
         self._accel_cap = accel_cap
         self._probe_verified = self._firmware.probe_target_verified
         self._counts: dict[str, int] = {}
+        self.valve_commissioning = ValveCommissioning(queue, motion, device_map, timeouts)
 
     async def configure(self) -> None:
         """Push baseline config to the controller (steps/unit, absolute mode)."""
@@ -185,6 +187,20 @@ class GcodeSender:
             "warning": "duration excludes acceleration/deceleration; not independent planners",
         }
 
+    def _check_pump_route(self, pump, direction: str) -> None:
+        if not pump.allowed_routes:
+            return
+        required = pump.allowed_routes.get(direction)
+        if not required:
+            raise ValueError(f"pump {pump.name}: no verified route for {direction}")
+        for name, positions in required.items():
+            valve = next((v for v in self._map.valves if v.name == name), None)
+            if valve is None or not valve.calibrated or not self._motion.homed[valve.axis]:
+                raise ValueError(f"pump {pump.name}: valve {name} is not calibrated/referenced")
+            if not any(abs(self._motion.positions[valve.axis] - valve.position(p)) <= 1e-3
+                       for p in positions):
+                raise ValueError(f"pump {pump.name}: valve {name} is outside its allowed route")
+
     async def pump(
         self,
         name: str,
@@ -196,6 +212,7 @@ class GcodeSender:
         pump = next((p for p in self._map.pumps if p.name == name), None)
         if pump is None or not pump.calibrated:
             raise ValueError("pump is unknown or not calibrated")
+        self._check_pump_route(pump, direction)
         if not all(math.isfinite(x) and x > 0 for x in (volume_ul, flow_ul_min)):
             raise ValueError("volume and flow must be finite and positive")
         sign = pump.dispense_direction * (1 if direction == "dispense" else -1)
@@ -236,6 +253,7 @@ class GcodeSender:
             pump = next((p for p in self._map.pumps if p.name == name), None)
             if pump is None or not pump.calibrated:
                 raise ValueError(f"pump {name} is unknown or uncalibrated")
+            self._check_pump_route(pump, dose.direction)
             if pump.axis in axes:
                 raise ValueError("two pumps cannot use the same axis in one coordinated step")
             volume, flow = float(dose.volume_ul), float(dose.flow_ul_min)
@@ -244,11 +262,25 @@ class GcodeSender:
             sign = pump.dispense_direction * (1 if dose.direction == "dispense" else -1)
             axes[pump.axis] = sign * volume / pump.volume_per_unit_ul
             durations.append(60 * volume / flow)
-        if max(durations) - min(durations) > max(durations) * 1e-6:
-            raise ValueError(
-                "pump volumes/flows imply different finish times; split into coordinated segments"
-            )
-        return await self.move_multi(axes, relative=True, duration_s=durations[0])
+        # Validate complete travel and individual speeds before sending ANY segment.
+        if any(len(set(axes) & set(group.axes)) > 1 for group in self._map.endstop_inputs):
+            raise ValueError("coordinated pumps share an endstop input")
+        for (axis, distance), duration in zip(axes.items(), durations, strict=True):
+            speed = 60 * abs(distance) / duration
+            plan = self._motion.plan_relative(axis, distance, speed)
+            if speed > plan.feedrate + 1e-9:
+                raise ValueError(f"requested pump flow exceeds configured speed limit on {axis}")
+        axis_durations = dict(zip(axes, durations, strict=True))
+        elapsed = 0.0
+        segments = []
+        for deadline in sorted(set(durations)):
+            dt = deadline - elapsed
+            segment = {a: d * dt / axis_durations[a] for a, d in axes.items()
+                       if axis_durations[a] > elapsed}
+            segments.append(await self.move_multi(segment, relative=True, duration_s=dt))
+            elapsed = deadline
+        return {"nominal_duration_s": max(durations), "segments": segments,
+                "warning": "Finish times are nominal; acceleration and planner junctions affect timing."}
 
     async def abort(self) -> None:
         self._motion.invalidate()

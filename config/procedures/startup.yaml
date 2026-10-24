@@ -1,0 +1,18 @@
+name: startup
+description: "DRAFT from the supplied startup table: reference valves one at a time, reference syringe pumps, then select pumping positions."
+version: 1
+draft: true
+parameters:
+  wash_direction: {type: integer, default: -1, minimum: -1, maximum: 1}
+  sheath_direction: {type: integer, default: -1, minimum: -1, maximum: 1}
+  sample_direction: {type: integer, default: -1, minimum: -1, maximum: 1}
+  release_distance: {type: number, default: 12, minimum: 0.1, maximum: 19.5}
+steps:
+  - op: call
+    procedure: home_valves_shared
+    parameters: {wash_direction: "${wash_direction}", sheath_direction: "${sheath_direction}", sample_direction: "${sample_direction}", wash_search: 9.0, sheath_search: 12.0, sample_search: 10.0, search_step: 0.5, home_feedrate: 90.0, pull_off: 0.5, release_distance: "${release_distance}"}
+  - {op: set_valve, name: wash_valve, position: "КП-ПРОКАЧКА"}
+  - {op: set_valve, name: sheath_valve, position: "КО-ПРОКАЧКА"}
+  - {op: set_valve, name: sample_valve, position: "КС-ПРОКАЧКА"}
+  - {op: call, procedure: reference_pumps}
+  - {op: checkpoint, name: "startup positions established; pump references verified"}

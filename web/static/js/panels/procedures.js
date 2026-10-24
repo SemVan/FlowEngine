@@ -44,10 +44,12 @@ function describeStep(step) {
   if (step.op === "move") return `${step.axis}: ${step.to !== undefined ? `to ${step.to}` : `by ${step.by}`}${step.feedrate !== undefined ? ` at F${step.feedrate}` : ""}`;
   if (step.op === "set_valve") return `${step.name} → ${step.position}`;
   if (step.op === "home") return step.axes?.length ? step.axes.join(", ") : "all axes";
+  if (step.op === "home_valve") return `${step.name} toward ${step.direction} on ${step.channel}`;
   if (step.op === "dwell") return `${step.seconds} s`;
   if (step.op === "log") return step.message;
   if (step.op === "checkpoint") return step.name;
   if (step.op === "call") return `${step.procedure} with ${JSON.stringify(step.parameters || {})}`;
+  if (step.op === "repeat") return `${step.procedure} × ${step.times} with ${JSON.stringify(step.parameters || {})}`;
   if (step.op === "move_multi") return `${step.relative ? "relative" : "absolute"} ${JSON.stringify(step.axes)}`;
   return JSON.stringify(step);
 }
@@ -202,17 +204,29 @@ function renderStepFields() {
       ${inputField("Acceleration (optional, axis units/s²)", "step-accel")}`;
   } else if (stepOp.value === "set_valve") {
     stepFields.innerHTML = `<label>Valve<select id="step-valve">${optionList(valves)}</select></label>
-      <label>Position<select id="step-position"><option value="A">A / position 1</option><option value="B">B / position 2</option></select></label>`;
-  } else if (stepOp.value === "home") {
+      ${inputField("Position name (A/B or configured name)", "step-position", "A")}`;
+  } else if (["home", "require_reference"].includes(stepOp.value)) {
     stepFields.innerHTML = inputField("Axes, comma separated (empty = all)", "step-axes");
+  } else if (stepOp.value === "home_valve") {
+    stepFields.innerHTML = `<label>Valve<select id="step-valve">${optionList(valves)}</select></label>
+      ${inputField("Shared endstop channel", "step-channel", "z_min")}
+      ${inputField("Direction (-1 or 1, or \${parameter})", "step-direction", "-1")}
+      ${inputField("Search step", "step-search-step", "0.25")}
+      ${inputField("Feedrate", "step-feedrate", "30")}
+      ${inputField("Maximum search distance", "step-value")}
+      ${inputField("Maximum release distance (optional)", "step-release-distance")}
+      ${inputField("Pull-off after release", "step-backoff", "0.5")}
+      <label class="inline-check"><input id="step-release-motor" type="checkbox"> Release motor after home</label>
+      <small>Only this valve moves. The shared input must be open before the step starts.</small>`;
   } else if (stepOp.value === "dwell") {
     stepFields.innerHTML = inputField("Seconds or \${parameter}", "step-seconds", "1");
   } else if (stepOp.value === "log") {
     stepFields.innerHTML = inputField("Message", "step-message");
   } else if (stepOp.value === "checkpoint") {
     stepFields.innerHTML = inputField("Checkpoint name", "step-checkpoint");
-  } else if (stepOp.value === "call") {
+  } else if (["call", "repeat"].includes(stepOp.value)) {
     stepFields.innerHTML = `<label>Procedure<select id="step-procedure">${optionList(knownProcedures.filter((name) => name !== procedure.name))}</select></label>
+      ${stepOp.value === "repeat" ? inputField("Times or \${parameter} (1–1000)", "step-times", "1") : ""}
       ${inputField("Child parameters (JSON)", "step-call-parameters", "{}")}
       <small id="step-call-help"></small>`;
     document.getElementById("step-procedure")?.addEventListener("change", fillCallParameterTemplate);
@@ -309,16 +323,35 @@ function buildStep() {
     return step;
   }
   if (stepOp.value === "set_valve") return { op: "set_valve", name: document.getElementById("step-valve").value, position: document.getElementById("step-position").value };
-  if (stepOp.value === "home") {
+  if (["home", "require_reference"].includes(stepOp.value)) {
     const axes = document.getElementById("step-axes").value.split(",").map((value) => value.trim()).filter(Boolean);
-    return { op: "home", axes: axes.length ? axes : null };
+    if (stepOp.value === "require_reference" && !axes.length) throw new Error("Select axes to check");
+    return { op: stepOp.value, axes: axes.length ? axes : null };
   }
+  if (stepOp.value === "home_valve") return {
+    op: "home_valve",
+    name: document.getElementById("step-valve").value,
+    channel: document.getElementById("step-channel").value,
+    direction: numberOrReference(document.getElementById("step-direction").value),
+    step: numberOrReference(document.getElementById("step-search-step").value),
+    feedrate: numberOrReference(document.getElementById("step-feedrate").value),
+    search_distance: numberOrReference(document.getElementById("step-value").value),
+    release_distance: numberOrReference(document.getElementById("step-release-distance").value, false),
+    pull_off: numberOrReference(document.getElementById("step-backoff").value),
+    release_motor: document.getElementById("step-release-motor").checked,
+  };
   if (stepOp.value === "dwell") return { op: "dwell", seconds: numberOrReference(document.getElementById("step-seconds").value) };
   if (stepOp.value === "log") return { op: "log", message: document.getElementById("step-message").value };
   if (stepOp.value === "checkpoint") return { op: "checkpoint", name: document.getElementById("step-checkpoint").value };
   if (stepOp.value === "call") return {
     op: "call",
     procedure: document.getElementById("step-procedure").value,
+    parameters: JSON.parse(document.getElementById("step-call-parameters").value || "{}"),
+  };
+  if (stepOp.value === "repeat") return {
+    op: "repeat",
+    procedure: document.getElementById("step-procedure").value,
+    times: numberOrReference(document.getElementById("step-times").value),
     parameters: JSON.parse(document.getElementById("step-call-parameters").value || "{}"),
   };
   if (stepOp.value === "move_multi") {
@@ -380,6 +413,17 @@ function parseParameters() {
   if (!value || Array.isArray(value) || typeof value !== "object") throw new Error("Run parameters must be a JSON object");
   return value;
 }
+
+document.getElementById("save-run-defaults")?.addEventListener("click", async () => {
+  try {
+    const values = parseParameters();
+    for (const [key, value] of Object.entries(values)) {
+      if (!procedure.parameters[key]) throw new Error(`Unknown parameter ${key}`);
+      procedure.parameters[key].default = value;
+    }
+    show(await saveCurrent());
+  } catch (error) { show(`Cannot save defaults: ${error.message}`); }
+});
 
 async function saveCurrent() {
   syncModelFromHeader();

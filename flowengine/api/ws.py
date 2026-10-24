@@ -7,12 +7,12 @@ client); commands go via REST.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from contextlib import suppress
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-
-from flowengine.api.deps import get_ctx
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -42,12 +42,30 @@ async def telemetry_ws(ws: WebSocket):
         )
     )
     async with ctx.events.subscribe() as queue:
+        async def receive_disconnect():
+            while True:
+                message = await ws.receive()
+                if message["type"] == "websocket.disconnect":
+                    return
+
+        receiver = asyncio.create_task(receive_disconnect())
+        event = None
         try:
             while True:
-                msg = await queue.get()
-                await ws.send_text(json.dumps(msg))
-        except WebSocketDisconnect:
+                event = asyncio.create_task(queue.get())
+                done, _pending = await asyncio.wait(
+                    {receiver, event}, return_when=asyncio.FIRST_COMPLETED)
+                if receiver in done:
+                    return
+                await ws.send_text(json.dumps(event.result()))
+        except (WebSocketDisconnect, asyncio.CancelledError):
             return
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("ws telemetry loop crashed")
             return
+        finally:
+            tasks = [receiver] + ([event] if event is not None else [])
+            for task in tasks:
+                task.cancel()
+            with suppress(asyncio.CancelledError):
+                await asyncio.gather(*tasks, return_exceptions=True)

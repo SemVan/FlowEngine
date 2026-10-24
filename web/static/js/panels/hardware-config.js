@@ -16,7 +16,8 @@ const specs = {
     ["volume_per_unit_ul", "µL/axis unit", "number"], ["dispense_direction", "Dispense sign (+1/-1)", "number"],
     ["calibrated", "Calibration confirmed", "checkbox"], ["calibration_notes", "Conditions / notes", "text"]],
   valves: [["name", "Valve", "text"], ["axis", "Axis", "text"], ["position_a", "Position 1/A", "number"],
-    ["position_b", "Position 2/B", "number"], ["home_position", "Home position", "choice:A,B"]],
+    ["position_b", "Position 2/B", "number"], ["home_position", "Home position", "choice:A,B"],
+    ["calibrated", "Both physical routes confirmed", "checkbox"], ["calibration_notes", "Conditions / notes", "text"]],
   endstop_inputs: [["channel", "Marlin channel", "text"], ["axes", "Shared axes (comma separated)", "list"], ["notes", "Wiring / switches", "text"]],
   analog_inputs: [["name", "Sensor", "text"], ["source", "Firmware source (T0/B/ADC0)", "text"],
     ["quantity", "temperature / analog", "text"], ["units", "Units", "text"], ["scale", "Scale", "number"],
@@ -145,7 +146,7 @@ if (container) {
       if (profile.device_map.axes.find(a => a.marlin_axis === p.axis).steps_per_unit !== calibrated.steps_per_unit) throw new Error("Steps/unit changed since calculation: recalculate");
       p.volume_per_unit_ul = calibrated.volume_per_unit_ul; p.calibrated = true;
       p.calibration_notes = `Measured ${new Date().toISOString()}, repeats=${calibrated.repeats}, relative_stddev=${calibrated.relative_stddev}; ADD speed/fluid/pressure/direction`;
-      editor.value = JSON.stringify(profile, null, 2); renderHardwareForms(); show("Coefficient added. Fill conditions, save profile and restart to activate.");
+      editor.value = JSON.stringify(profile, null, 2); renderHardwareForms(); show("Coefficient added to editor only. Use Наладка to preserve raw measurements with the coefficient; save and apply the profile to activate it.");
     } catch(e) { show(e.message); }
   });
 }

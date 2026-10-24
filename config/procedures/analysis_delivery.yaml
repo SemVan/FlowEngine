@@ -1,0 +1,20 @@
+name: analysis_delivery
+description: "DRAFT from the supplied cycle: set pumping path and dispense sample and sheath simultaneously at configured flows."
+version: 1
+draft: true
+parameters:
+  sample_volume_ul: {type: number, default: 100.0, minimum: 0.1}
+  sample_flow_ul_min: {type: number, default: 100.0, minimum: 0.1}
+  sheath_volume_ul: {type: number, default: 500.0, minimum: 0.1}
+  sheath_flow_ul_min: {type: number, default: 500.0, minimum: 0.1, description: "Set this from the desired sheath/sample flow ratio."}
+  acceleration: {type: number, default: 50.0, minimum: 0.1}
+steps:
+  - {op: set_valve, name: wash_valve, position: "КП-ПРОКАЧКА"}
+  - {op: set_valve, name: sheath_valve, position: "КО-ПРОКАЧКА"}
+  - {op: set_valve, name: sample_valve, position: "КС-ПРОКАЧКА"}
+  - op: pump_multi
+    pumps:
+      sample_pump: {volume_ul: "${sample_volume_ul}", flow_ul_min: "${sample_flow_ul_min}", direction: dispense}
+      sheath_pump: {volume_ul: "${sheath_volume_ul}", flow_ul_min: "${sheath_flow_ul_min}", direction: dispense}
+    acceleration: "${acceleration}"
+  - {op: checkpoint, name: "analysis delivery complete"}

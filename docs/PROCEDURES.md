@@ -1,10 +1,30 @@
 # Procedures DSL
 
-Procedures are YAML files. Shipped examples live in `config/procedures/*.yaml`; procedures saved in the web UI live in the user's FlowEngine config directory and shadow shipped files with the same name. The runner walks `steps` top-to-bottom. There are typed run parameters, but no loops or arbitrary expressions.
+Procedures are YAML files. Shipped examples live in `config/procedures/*.yaml`; procedures saved in the web UI live in the user's FlowEngine config directory and shadow shipped files with the same name. The runner walks `steps` top-to-bottom. There are typed run parameters and a bounded repeat of a named child procedure, but no arbitrary expressions or branching.
 
-> This is by design. Procedures are **audit-readable** because they're flat data. Adding a `for` loop turns this into a half-baked programming language; if you need control flow, write Python.
+> This is by design. Procedures remain **audit-readable** because `call` and `repeat` are expanded into a flat preview before execution. More complex control flow belongs outside this DSL.
 
 ## File format
+
+`require_reference` checks existing session references without sending motion or
+inventing a zero, for example `{op: require_reference, axes: [X, Y, U]}`.
+`reference_pumps` uses it until the engineer configures verified automatic HOME.
+`set_valve` accepts optional `feedrate` and `acceleration` for working-position moves.
+`pump_multi` splits different nominal finish times into coordinated segments;
+acceleration affects actual timing, so this is not independent motion planning.
+Pump `allowed_routes` can require named valve positions for each pump direction.
+See [the commissioning guide](COLLEAGUE_COMMISSIONING.md) for persistent evidence,
+profile application and configuration transfer.
+
+For `home_valve`, `search_distance` limits travel toward the switch;
+`release_distance` separately limits automatic travel away until the switch opens.
+`pull_off` adds clearance after the switch opens. `release_distance + pull_off`
+must not exceed 20 axis units (the commissioning limit); the configured value
+must fit the real mechanism, even when the configured axis travel is provisional.
+If `release_distance` is omitted, the legacy search/travel limit is retained.
+The same release limit applies when starting with an already pressed shared input:
+verify that the selected valve is the one pressing it. A failed search/release
+leaves that valve unreferenced and releases its motor.
 
 ```yaml
 name: prime_sample
@@ -46,7 +66,7 @@ The page supports the commissioning workflow:
 6. Use **Run only this step** to commission one selected step. On real hardware this still requires the global motion interlock, homing where applicable, and an explicit browser confirmation.
 7. Clear `draft` only after the individual steps and their ordering have been checked. Only then can **Run complete procedure** start the full sequence.
 
-The four supplied fluidics procedures are intentionally incomplete examples. Their real device names, signed pump travel, speeds, and valve calibration must be filled during hardware commissioning.
+The supplied `startup`, `wash`, `sample_intake`, `analysis_delivery`, `measurement_iteration`, and `cyclic_measurement` procedures are drafts reconstructed from the provided workbook. Their positions, volumes, flows, accelerations and unverified B/C home directions must be commissioned before full execution.
 
 ## Run parameters
 
@@ -82,8 +102,10 @@ Additional executable operations (all examples remain drafts until commissioned)
 | `motors` | enabled | Optional axes; release invalidates their home |
 | `read_sensors` | — | One M105 report mapped through analog_inputs |
 | `seek` | axis, channel, by, feedrate | Verified G38.2 contact search; optional zero |
-| `calibrate_valve` | axis, channel, search_distance, feedrate, backoff | Endpoint spans; repeats=3 |
+| `home_valve` | name, channel, direction, search_distance | Host-stepped home of one valve against its single switch on a shared input |
+| `calibrate_valve` | axis, channel, search_distance, feedrate, backoff | Legacy two-contact span measurement; not applicable to the current one-switch valves |
 | `test_reference` | axis, channel, by, feedrate, reference_feedrate, backoff, tolerance_pulses | Return-reference error; repeats=3 |
+| `repeat` | procedure, times | Repeat one named child procedure 1–1000 times; optional child parameters |
 
 `move` also accepts units=axis/steps, speed_units=axis/min, axis/s or steps/s.
 `move`, `move_multi` and `pump` accept acceleration in axis units/s²; it is scoped
@@ -132,6 +154,20 @@ Matching axis units, homed axes, component speed limits and non-shared endstop i
   axes: [E0]        # omit `axes` to home all
 ```
 
+Do not use `home`/G28 for `A/B/C`: their three individual switches share `z_min`.
+Use `home_valve` sequentially so only one mechanism can cause the shared signal:
+
+```yaml
+- op: home_valve
+  name: wash_valve
+  channel: z_min
+  direction: -1
+  step: 0.25
+  feedrate: 30
+  search_distance: 9
+  pull_off: 0.5
+```
+
 ### `dwell`
 
 ```yaml
@@ -156,10 +192,11 @@ Reserved operation. It can be stored and previewed, but the runner currently ref
 ```yaml
 - op: set_valve
   name: sample_valve   # must match a `valves[*].name` in device_map
-  position: A          # or B
+  position: "КС-ЗАБОР" # A/B or a name from valve.position_names
 ```
 
 Semantic wrapper around `move` for two-position valves.
+Execution is refused while that valve has `calibrated: false`; preview still shows the resolved target.
 
 ### `wait_pressure`
 
@@ -211,6 +248,18 @@ Circular calls such as `A → B → A` are rejected, and nesting is limited to e
 
 The shipped `composite_wash_example` demonstrates a parent procedure passing its parameters into the reusable `wash_user` draft.
 
+### `repeat`
+
+```yaml
+- op: repeat
+  procedure: measurement_iteration
+  times: "${cycles}"
+  parameters:
+    sample_volume_ul: "${sample_volume_ul}"
+```
+
+`times` must resolve to an integer from 1 to 1000. Preview expands every iteration and labels paths as `repeat 1/N`, `repeat 2/N`, and so on. Recursive calls and repeats are rejected.
+
 ## Lint
 
 Loading is two-step:
@@ -231,7 +280,7 @@ python -c "from flowengine.loaders import load_device_map, list_procedures; \
 
 ## Style
 
-- One file per procedure. Composability is "operator runs procedure A then procedure B," not include directives.
+- One file per reusable procedure. Compose larger workflows with `call` and bounded `repeat`.
 - Keep names snake_case. They become URL segments (`/api/procedures/<name>/run`).
 - Prefer absolute `to:` over relative `by:` when the move ends at a known position (e.g., parking the autosampler). Use `by:` only for relative-feed operations like priming.
 - `log` steps at start and end of long procedures — the audit log will thank you when something goes wrong at 3 AM.

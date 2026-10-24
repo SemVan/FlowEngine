@@ -17,7 +17,7 @@ from flowengine.errors import ConfigError, FlowEngineError
 from flowengine.loaders import list_procedures, load_procedure
 from flowengine.procedures import expand_procedure
 from flowengine.procedures.preflight import execution_issues
-from flowengine.schemas import CallStep, Procedure
+from flowengine.schemas import CallStep, Procedure, RepeatStep
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/procedures", tags=["procedures"])
@@ -128,14 +128,13 @@ async def run_step(
         if step_number < 1 or step_number > len(resolved.steps):
             raise ValueError(f"step number must be between 1 and {len(resolved.steps)}")
         step = resolved.steps[step_number - 1]
-        if isinstance(step, CallStep):
-            expanded = expand_procedure(
-                _load_named(step.procedure),
-                _load_named,
-                step.parameters,
-                allow_draft=True,
-            )
-            paths = [f"{name} step {step_number} → {path}" for path in expanded.step_paths]
+        if isinstance(step, (CallStep, RepeatStep)):
+            selected = Procedure(name=f"{name}_selected", steps=[step])
+            expanded = expand_procedure(selected, _load_named, allow_draft=True)
+            paths = [
+                path.replace(f"{name}_selected step 1", f"{name} step {step_number}", 1)
+                for path in expanded.step_paths
+            ]
             issues = execution_issues(expanded.procedure, ctx.device_map, ctx.runtime)
             if issues:
                 raise ValueError("; ".join(issues))

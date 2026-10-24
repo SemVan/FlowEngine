@@ -58,6 +58,18 @@ async def put_profile(name: str, profile: ConfigurationProfile):
     if profile.name != name:
         raise HTTPException(status_code=400, detail="URL name must match profile.name")
     try:
+        # An editor opened before a calibration/procedure result was saved must
+        # not erase the newer evidence when saving hardware settings.
+        try:
+            previous = load_yaml(find_saved("profiles", name), ConfigurationProfile)
+        except ConfigError:
+            previous = None
+        if previous:
+            import json
+            records = {json.dumps(r.model_dump(mode="json"), sort_keys=True): r
+                       for r in [*previous.commissioning, *profile.commissioning]}
+            profile = profile.model_copy(update={"commissioning": sorted(
+                records.values(), key=lambda r: r.timestamp.isoformat())})
         path = save_yaml("profiles", name, profile)
     except ConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -66,7 +78,9 @@ async def put_profile(name: str, profile: ConfigurationProfile):
         "name": name,
         "file": path.name,
         "restart_required": True,
+        "live_apply_url": f"/api/commissioning/profiles/{name}/apply",
         "restart_command": f"python -m flowengine --profile {name}",
+        "file_path": str(path),
     }
 
 

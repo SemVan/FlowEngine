@@ -45,6 +45,14 @@ class MotionModel:
             self._homed[a] = True
             self._positions[a] = 0.0
 
+    def mark_referenced(self, axis: str, position: float) -> None:
+        """Accept an externally verified reference and its current coordinate."""
+        self._map.axis(axis)
+        if not math.isfinite(position):
+            raise SoftLimitError("referenced position must be finite")
+        self._homed[axis] = True
+        self._positions[axis] = position
+
     def invalidate(self, axes: list[str] | None = None) -> None:
         for axis in axes if axes is not None else self._homed:
             self._map.axis(axis)

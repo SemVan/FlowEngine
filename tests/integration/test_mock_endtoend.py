@@ -29,8 +29,8 @@ def test_state_reports_connected(client):
 
 
 def test_home_all_and_jog(client):
-    # Home everything first.
-    r = client.post("/api/home", json={"axes": None})
+    # Home the independent syringe axis; shared valve inputs require home_valve.
+    r = client.post("/api/home", json={"axes": ["X"]})
     assert r.status_code == 200, r.text
 
     # Jog X +1.0 mm.
@@ -48,7 +48,7 @@ def test_jog_before_home_rejected(client):
     # Re-create with fresh state by restarting? Use the test we have: jog should fail soft-limit.
     # State on existing fixture is post-home so we can't easily test pre-home here.
     # Instead, jog an axis past its travel limit.
-    client.post("/api/home", json={"axes": None})
+    client.post("/api/home", json={"axes": ["X"]})
     r = client.post(
         "/api/jog",
         json={"axis": "X", "delta": 99999.0, "feedrate": 100.0},
@@ -175,6 +175,20 @@ def test_nested_draft_can_be_previewed_and_run_as_one_selected_step(client):
     assert "wash_pump_test step 1" in selected.json()["step_path"]
 
 
+def test_shipped_cyclic_measurement_expands_repeats_but_stays_blocked(client):
+    preview = client.post("/api/procedures/cyclic_measurement/preview", json={"cycles": 2})
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    assert body["draft"] is True
+    assert len(body["steps"]) == 42
+    assert any("repeat 2/2" in path for path in body["step_paths"])
+    assert any("working positions are uncalibrated" in issue for issue in body["execution_issues"])
+    assert any("pump" in issue and "uncalibrated" in issue for issue in body["execution_issues"])
+
+    refused = client.post("/api/procedures/cyclic_measurement/run", json={"cycles": 2})
+    assert refused.status_code == 409
+
+
 def test_profiles_and_racks_can_be_saved(client):
     active = client.get("/api/config").json()
     profile = {
@@ -208,7 +222,17 @@ def test_profiles_and_racks_can_be_saved(client):
 
 
 def test_procedure_runs_end_to_end(client):
-    response = client.post("/api/procedures/home_all/run")
+    procedure = {
+        "name": "smoke_run",
+        "description": "runner smoke test",
+        "version": 1,
+        "steps": [
+            {"op": "log", "message": "started"},
+            {"op": "checkpoint", "name": "done"},
+        ],
+    }
+    assert client.put("/api/procedures/smoke_run", json=procedure).status_code == 200
+    response = client.post("/api/procedures/smoke_run/run")
     assert response.status_code == 200, response.text
     deadline = time.monotonic() + 2
     while time.monotonic() < deadline:
@@ -218,16 +242,17 @@ def test_procedure_runs_end_to_end(client):
         time.sleep(0.01)
     assert status == {
         "running": False,
-        "name": "home_all",
+        "name": "smoke_run",
         "step": 2,
-        "step_path": "home_all step 2",
+        "step_path": "smoke_run step 2",
         "error": None,
         "results": [],
+        "persistence_error": None,
     }
 
 
 def test_idempotency_key_dedupes(client):
-    client.post("/api/home", json={"axes": None})
+    client.post("/api/home", json={"axes": ["X"]})
     h = {"Idempotency-Key": "dedupe-key"}
     r1 = client.post("/api/jog", json={"axis": "X", "delta": 1.0, "feedrate": 100.0}, headers=h)
     r2 = client.post("/api/jog", json={"axis": "X", "delta": 1.0, "feedrate": 100.0}, headers=h)
