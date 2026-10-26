@@ -73,7 +73,7 @@ def _require_motion_enabled(ctx: AppContext) -> None:
 
 def _require_home_allowed(ctx: AppContext, axes: list[str] | None) -> list[str]:
     """разрешаем Home калиброванных X/Y без включения обычного движения"""
-    targets = axes if axes is not None else [a.marlin_axis for a in ctx.device_map.axes]
+    targets = axes if axes is not None else [a.marlin_axis for a in ctx.device_map.axes if a.kind != "peristaltic_pump"]
     if not targets:
         raise ValueError("select at least one axis to home")
     needs_normal_interlock = False

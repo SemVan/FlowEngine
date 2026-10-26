@@ -105,6 +105,11 @@ been verified physically.
 
 ## 5. User overlays (optional)
 
+For a reproducible colleague handoff use `FLOWENGINE_CONFIG_DIR=./local-config`
+and follow [the commissioning guide](COLLEAGUE_COMMISSIONING.md). The commissioning
+page displays the absolute directory in use. Named profiles are under `profiles/`,
+saved procedures under `procedures/`; transfer both using the handoff JSON export.
+
 Repo `config/*.yaml` are read-only defaults. To customize without polluting git, drop overrides into your XDG config dir:
 
 ```bash

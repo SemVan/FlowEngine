@@ -33,7 +33,7 @@ def test_state_change_pushes_event(client):
         ws.receive_text()
         ws.receive_text()
         # trigger a state change
-        client.post("/api/home", json={"axes": None})
+        client.post("/api/home", json={"axes": ["X"]})
         # we may receive several events; assert at least one is `state` going to a non-idle state
         seen_homing = False
         for _ in range(8):

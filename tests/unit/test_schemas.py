@@ -11,6 +11,7 @@ from flowengine.schemas import (
     DeviceMap,
     Procedure,
     RuntimeParams,
+    ValveConfig,
 )
 
 
@@ -112,3 +113,18 @@ def test_draft_procedure_only_resolves_for_preview_or_single_step():
     resolved = procedure.resolve(allow_draft=True)
     assert resolved.draft is False
     assert resolved.steps[0].by == 1.5  # type: ignore[union-attr]
+
+
+def test_valve_named_positions_resolve_to_configured_coordinates():
+    valve = ValveConfig(
+        name="wash",
+        axis="A",
+        position_a=0,
+        position_b=9.5,
+        position_names={"pump": "A", "wash": "B"},
+    )
+    assert valve.position("pump") == 0
+    assert valve.position("wash") == 9.5
+    assert valve.position("B") == 9.5
+    with pytest.raises(ValueError, match="unknown position"):
+        valve.position("missing")

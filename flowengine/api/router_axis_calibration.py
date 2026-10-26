@@ -1008,6 +1008,7 @@ def _apply_runtime_device_map(ctx: AppContext, device_map) -> None:
     ctx.device_map = device_map
     ctx.motion._map = device_map
     ctx.sender._map = device_map
+    ctx.sender.valve_commissioning._map = device_map
     ctx.sender._homing = EndstopHoming(device_map, timeout_s=ctx.runtime.timeouts.homing)
     if hasattr(ctx.runner, "_map"):
         ctx.runner._map = device_map

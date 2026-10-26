@@ -11,10 +11,10 @@ from pathlib import Path
 
 from flowengine.errors import ConfigError, ProcedureError
 from flowengine.loaders import load_procedure
-from flowengine.schemas.procedure import HomeValveStep
 from flowengine.schemas import (
     DeviceMap,
     HomeStep,
+    HomeValveStep,
     MoveMultiStep,
     MoveStep,
     Procedure,
@@ -40,9 +40,20 @@ def lint(proc: Procedure, dm: DeviceMap) -> list[str]:
                 for axis in step.axes:
                     if axis not in known_axes:
                         issues.append(f"step {i}: unknown axis {axis!r}")
-        elif isinstance(step, (SetValveStep, HomeValveStep)):
+        elif isinstance(step, SetValveStep):
             if step.name not in known_valves:
                 issues.append(f"step {i}: unknown valve {step.name!r}")
+            else:
+                valve = next(v for v in dm.valves if v.name == step.name)
+                try:
+                    valve.position(step.position)
+                except ValueError as exc:
+                    issues.append(f"step {i}: {exc}")
+        elif isinstance(step, HomeValveStep):
+            if step.name not in known_valves:
+                issues.append(f"step {i}: unknown valve {step.name!r}")
+            elif not dm.shared_valve_endstop.channel:
+                issues.append(f"step {i}: shared valve input is not configured")
     return issues
 
 

@@ -20,6 +20,7 @@ from flowengine.hardware.endstop_seek import seek_switch
 from flowengine.hardware.homing.base import HomingStrategy
 from flowengine.hardware.motion import MotionModel
 from flowengine.hardware.queue import CommandQueue, CommandResult
+from flowengine.hardware.valve_commissioning import ValveCommissioning
 from flowengine.schemas.device import AxisCalibration, DeviceMap
 from flowengine.schemas.procedure import NumberValue, PumpDose
 from flowengine.schemas.runtime import FirmwareExpectation, Timeouts
@@ -60,9 +61,10 @@ class GcodeSender:
         self.step_check_job: dict[str, Any] | None = None
         from flowengine.hardware.valves import ValveSubsystem
         self.valves = ValveSubsystem(self)
+        self.valve_commissioning = ValveCommissioning(queue, motion, device_map, timeouts)
 
-    async def set_valve(self, name: str, position: str) -> None:
-        await self.valves.set_valve(name, position)
+    async def set_valve(self, name: str, position: str, feedrate: float | None = None) -> None:
+        await self.valves.set_valve(name, position, feedrate)
 
     async def home_valve(self, name: str):
         return await self.valves.home_valve(name)
@@ -222,6 +224,20 @@ class GcodeSender:
             "warning": "duration excludes acceleration/deceleration; not independent planners",
         }
 
+    def _check_pump_route(self, pump, direction: str) -> None:
+        if not pump.allowed_routes:
+            return
+        required = pump.allowed_routes.get(direction)
+        if not required:
+            raise ValueError(f"pump {pump.name}: no verified route for {direction}")
+        for name, positions in required.items():
+            valve = next((v for v in self._map.valves if v.name == name), None)
+            if valve is None or not valve.calibrated or not self._motion.homed[valve.axis]:
+                raise ValueError(f"pump {pump.name}: valve {name} is not calibrated/referenced")
+            if not any(abs(self._motion.positions[valve.axis] - valve.position(p)) <= 1e-3
+                       for p in positions):
+                raise ValueError(f"pump {pump.name}: valve {name} is outside its allowed route")
+
     async def pump(
         self,
         name: str,
@@ -235,6 +251,7 @@ class GcodeSender:
             raise ValueError("pump is unknown or not calibrated")
         if not all(math.isfinite(x) and x > 0 for x in (volume_ul, flow_ul_min)):
             raise ValueError("volume and flow must be finite and positive")
+        self._check_pump_route(pump, direction)
         sign = pump.dispense_direction * (1 if direction == "dispense" else -1)
         requested = flow_ul_min / pump.volume_per_unit_ul
         checked = self._motion.plan_relative(
@@ -279,6 +296,7 @@ class GcodeSender:
             pump = next((p for p in self._map.pumps if p.name == name), None)
             if pump is None or not pump.calibrated:
                 raise ValueError(f"pump {name} is unknown or uncalibrated")
+            self._check_pump_route(pump, dose.direction)
             if pump.axis in axes:
                 raise ValueError("two pumps cannot use the same axis in one coordinated step")
             volume, flow = float(dose.volume_ul), float(dose.flow_ul_min)
@@ -287,11 +305,25 @@ class GcodeSender:
             sign = pump.dispense_direction * (1 if dose.direction == "dispense" else -1)
             axes[pump.axis] = sign * volume / pump.volume_per_unit_ul
             durations.append(60 * volume / flow)
-        if max(durations) - min(durations) > max(durations) * 1e-6:
-            raise ValueError(
-                "pump volumes/flows imply different finish times; split into coordinated segments"
-            )
-        return await self.move_multi(axes, relative=True, duration_s=durations[0])
+        # Validate complete travel and individual speeds before sending ANY segment.
+        if any(len(set(axes) & set(group.axes)) > 1 for group in self._map.endstop_inputs):
+            raise ValueError("coordinated pumps share an endstop input")
+        for (axis, distance), duration in zip(axes.items(), durations, strict=True):
+            speed = 60 * abs(distance) / duration
+            plan = self._motion.plan_relative(axis, distance, speed)
+            if speed > plan.feedrate + 1e-9:
+                raise ValueError(f"requested pump flow exceeds configured speed limit on {axis}")
+        axis_durations = dict(zip(axes, durations, strict=True))
+        elapsed = 0.0
+        segments = []
+        for deadline in sorted(set(durations)):
+            dt = deadline - elapsed
+            segment = {a: d * dt / axis_durations[a] for a, d in axes.items()
+                       if axis_durations[a] > elapsed}
+            segments.append(await self.move_multi(segment, relative=True, duration_s=dt))
+            elapsed = deadline
+        return {"nominal_duration_s": max(durations), "segments": segments,
+                "warning": "Finish times are nominal; acceleration and planner junctions affect timing."}
 
     @property
     def reference_counts(self) -> dict[str, int]:
@@ -851,7 +883,7 @@ class GcodeSender:
         epoch = self.reference_epoch
         self.manual_session = None
         self._expected.clear()
-        targets = axes if axes is not None else [a.marlin_axis for a in self._map.axes]
+        targets = axes if axes is not None else [a.marlin_axis for a in self._map.axes if a.kind != "peristaltic_pump"]
         if not targets:
             raise ValueError("select at least one axis to home")
         if any(self.valves.for_axis(a) for a in targets):
@@ -860,8 +892,12 @@ class GcodeSender:
             if await self.valves.read():
                 raise StateError("Shared valve endstop TRIGGERED / SOURCE UNKNOWN; service release required")
         for a in targets:
-            self._map.axis(a)
-            if self._map.axis(a).homing_strategy != "endstop":
+            cfg = self._map.axis(a)
+            if a in {"X", "Y"} and cfg.kind == "syringe_pump" and cfg.endstop_channels_shared and cfg.axis_calibration is None:
+                raise ValueError(f"{a}: сначала сохраните калибровку двух концевиков; G28 запрещён")
+            if cfg.kind == "peristaltic_pump":
+                raise ValueError(f"{a}: для вращающегося насоса подтвердите исходную координату в Наладке")
+            if cfg.homing_strategy != "endstop":
                 raise ValueError("sensorless/crash homing is not implemented")
 
         self._motion.invalidate(targets)

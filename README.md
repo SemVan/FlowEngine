@@ -127,3 +127,6 @@ User-specific overlays go to `$XDG_CONFIG_HOME/flowengine/` (e.g. `~/.config/flo
 ## License
 
 MIT.
+
+
+Наладка и процедуры в personal объединены с commissioning-handoff. Управление HOME и калибровка X/Y сохранены из personal. Порядок работы: [Наладка personal](docs/PERSONAL_COMMISSIONING.md).

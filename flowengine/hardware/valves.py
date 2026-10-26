@@ -294,10 +294,12 @@ class ValveSubsystem:
                     raise
             return results
 
-    async def set_valve(self, name, position):
+    async def set_valve(self, name, position, feedrate=None):
         cfg = self.config(name)
-        if position not in {"A", "B"}:
-            raise ValueError("position must be A or B")
+        position = cfg.position_slot(position)
+        speed = self.sender._map.axis(cfg.axis).feedrate_default if feedrate is None else feedrate
+        if not math.isfinite(speed) or speed <= 0:
+            raise ValueError("finite positive valve feedrate required")
         if not cfg.calibrated:
             raise StateError("Valve calibration A/B required")
         if not self.sender._motion.homed[cfg.axis]:
@@ -309,7 +311,7 @@ class ValveSubsystem:
             raise ControllerError(st.error)
         async with self.operation(name, "MOVING") as (cfg, st):
             await self.finite_move(cfg, cfg.position_a if position == "A" else cfg.position_b,
-                                   self.sender._map.axis(cfg.axis).feedrate_default)
+                                    speed)
             st.state, st.current = "REFERENCED", position
 
     async def calibrate(self, name):
@@ -317,6 +319,40 @@ class ValveSubsystem:
             await self._home(cfg, st)
             st.commissioning = True
             st.saved_a = st.saved_b = False
+
+    async def move_referenced(self, name, delta, feedrate):
+        cfg = self.config(name)
+        if not self.sender._motion.homed[cfg.axis]:
+            raise StateError("Valve Home required before positioning")
+        if not math.isfinite(delta) or not 0 < abs(delta) <= 20:
+            raise ValueError("Use a nonzero move of at most 20 axis units")
+        if not math.isfinite(feedrate) or feedrate <= 0:
+            raise ValueError("Positive finite feedrate required")
+        async with self.operation(name, "MOVING") as (cfg, st):
+            target = await self.position(cfg) + delta
+            if target * self.direction(cfg) >= 0:
+                raise ValueError("Working position must remain away from HOME")
+            position = await self.finite_move(cfg, target, feedrate)
+            st.current = "UNKNOWN"
+        return {"ok": True, "axis": cfg.axis, "position": position, "referenced": True}
+
+    async def service_move(self, name, delta, feedrate):
+        cfg = self.config(name)
+        if not math.isfinite(delta) or not 0 < abs(delta) <= 20:
+            raise ValueError("Use a nonzero service move of at most 20 axis units")
+        if not math.isfinite(feedrate) or not 0 < feedrate <= min(120, self.sender._motion.max_feedrate(cfg.axis)):
+            raise ValueError("Service feedrate must be positive and at most 120 units/min")
+        if len(cfg.axis) != 1:
+            raise ValueError("Service release requires a single-letter motor axis")
+        async with self.operation(name, "MOVING", allow_pressed=True, release_after=True) as (cfg, st):
+            if self.shared and delta * self.direction(cfg) >= 0:
+                raise StateError("Pressed shared input: service motion is permitted only away from HOME")
+            self.invalidate()
+            start = await self.position(cfg)
+            await self.finite_move(cfg, start + delta, feedrate, release=bool(self.shared))
+            st.current = "UNKNOWN"
+        return {"ok": True, "device": name, "axis": cfg.axis, "delta": delta,
+                "motor_released": st.service_release == "ACKNOWLEDGED", "position_trusted": False}
 
     def validate_jog(self, name, delta, *, service=False):
         cfg = self.config(name)

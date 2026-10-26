@@ -1,0 +1,20 @@
+name: sample_intake
+description: "DRAFT from the supplied cycle: set intake path and aspirate sample and sheath simultaneously."
+version: 1
+draft: true
+parameters:
+  sample_volume_ul: {type: number, default: 100.0, minimum: 0.1}
+  sample_flow_ul_min: {type: number, default: 100.0, minimum: 0.1}
+  sheath_volume_ul: {type: number, default: 500.0, minimum: 0.1}
+  sheath_flow_ul_min: {type: number, default: 500.0, minimum: 0.1}
+  acceleration: {type: number, default: 50.0, minimum: 0.1}
+steps:
+  - {op: set_valve, name: wash_valve, position: "КП-ПРОКАЧКА"}
+  - {op: set_valve, name: sheath_valve, position: "КО-ЗАБОР"}
+  - {op: set_valve, name: sample_valve, position: "КС-ЗАБОР"}
+  - op: pump_multi
+    pumps:
+      sample_pump: {volume_ul: "${sample_volume_ul}", flow_ul_min: "${sample_flow_ul_min}", direction: aspirate}
+      sheath_pump: {volume_ul: "${sheath_volume_ul}", flow_ul_min: "${sheath_flow_ul_min}", direction: aspirate}
+    acceleration: "${acceleration}"
+  - {op: checkpoint, name: "sample and sheath loaded"}

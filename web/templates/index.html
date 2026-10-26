@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
+{% include "partials/procedure_builder.html" %}
+<details class="service-controls">
+<summary>Ручное управление и диагностика</summary>
 {% include "partials/workbench.html" %}
 <section class="panel homing-panel" data-panel="homing">
   <h2>Home / привязка координат</h2>
@@ -56,17 +59,12 @@
   <pre id="diagnostic-output" aria-live="polite">Select a diagnostic command.</pre>
 </section>
 
-<section class="panel mode-panel" data-panel="modes">
-  <h2>Modes <span class="phase-tag">Phase 2</span></h2>
-  <div id="mode-buttons">
-    <button type="button" disabled>Mode A</button>
-    <button type="button" disabled>Mode B</button>
-    <button type="button" disabled>Mode C</button>
-  </div>
-</section>
-
 <section class="panel fluidics-panel" data-panel="fluidics">
   <h2>Fluidics <span class="phase-tag">Phase 2</span></h2>
   {% include "partials/fluidics_svg.html" %}
 </section>
+</details>
+{% endblock %}
+{% block scripts %}
+<script type="module" src="/static/js/panels/procedures.js"></script>
 {% endblock %}

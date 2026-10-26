@@ -1,474 +1,499 @@
 import { api } from "../api.js";
 
-const list = document.getElementById("proc-list");
-const editor = document.getElementById("proc-detail");
-const parameters = document.getElementById("proc-parameters");
-const parameterFields = document.getElementById("proc-parameter-fields");
-const result = document.getElementById("proc-result");
-const nameInput = document.getElementById("proc-name");
-const descriptionInput = document.getElementById("proc-description");
-const draftInput = document.getElementById("proc-draft");
-const stepsList = document.getElementById("proc-steps");
-const stepOp = document.getElementById("step-op");
-const stepFields = document.getElementById("step-fields");
-
-let procedure = emptyProcedure();
-let hardware = { device_map: { axes: [], valves: [] } };
+const $ = id => document.getElementById(id);
+const axes = () => hardware.device_map.axes;
+const valves = () => hardware.device_map.valves;
+const pumps = () => hardware.device_map.pumps || [];
+const valveNames = { wash_valve: "Кран промывки", sheath_valve: "Кран обжимающей жидкости", sample_valve: "Кран сэмплера" };
+const pumpNames = { sample_pump: "Насос суспензии", sheath_pump: "Насос обжимающей жидкости", wash_pump: "Насос промывки" };
+const opNames = Object.fromEntries([...$("step-op").options].map(o => [o.value, o.textContent]));
+let hardware = { device_map: { axes: [], valves: [], pumps: [] } };
 let knownProcedures = [];
+let editing = null;
+let busy = true;
+let running = false;
+let activeStatus = {};
+let procedure = emptyProcedure();
+let savedText = "";
 
 function emptyProcedure() {
-  return { name: "new_procedure", description: "", version: 1, draft: true, parameters: {}, steps: [] };
+  return { name: "new_procedure", title: "", description: "", version: 1, draft: true, parameters: {}, steps: [] };
 }
 
-function show(value) {
-  result.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+function el(tag, text, className) {
+  const node = document.createElement(tag);
+  if (text !== undefined) node.textContent = text;
+  if (className) node.className = className;
+  return node;
 }
 
-function optionList(values, selected = "") {
-  const escape = v => String(v).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  return values.map((value) => `<option value="${escape(value)}" ${value === selected ? "selected" : ""}>${escape(value)}</option>`).join("");
+function show(value, message) {
+  $("proc-result").textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  $("proc-feedback").replaceChildren(el("p", message || (typeof value === "string" ? value : "Готово.")));
 }
 
-function syncModelFromHeader() {
-  procedure.name = nameInput.value.trim();
-  procedure.description = descriptionInput.value.trim();
-  procedure.draft = draftInput.checked;
+function syncHeader() {
+  procedure.name = $("proc-name").value.trim();
+  procedure.title = $("proc-title").value.trim();
+  procedure.description = $("proc-description").value.trim();
+  procedure.draft = $("proc-draft").checked;
 }
 
 function syncEditor() {
-  syncModelFromHeader();
-  editor.value = JSON.stringify(procedure, null, 2);
+  syncHeader();
+  $("proc-detail").value = JSON.stringify(procedure, null, 2);
+  updateButtons();
 }
 
-function describeStep(step) {
-  if (step.op === "move") return `${step.axis}: ${step.to !== undefined ? `to ${step.to}` : `by ${step.by}`}${step.feedrate !== undefined ? ` at F${step.feedrate}` : ""}`;
-  if (step.op === "set_valve") return `${step.name} → ${step.position}`;
-  if (step.op === "home") return step.axes?.length ? step.axes.join(", ") : "all axes";
-  if (step.op === "dwell") return `${step.seconds} s`;
-  if (step.op === "log") return step.message;
-  if (step.op === "checkpoint") return step.name;
-  if (step.op === "call") return `${step.procedure} with ${JSON.stringify(step.parameters || {})}`;
-  if (step.op === "move_multi") return `${step.relative ? "relative" : "absolute"} ${JSON.stringify(step.axes)}`;
-  return JSON.stringify(step);
+function updateButtons() {
+  for (const id of ["save-proc", "copy-proc", "new-proc", "preview-proc", "apply-json", "add-step", "save-run-defaults"]) $(id).disabled = busy || running;
+  $("run-proc").disabled = busy || running || $("proc-draft").checked || !procedure.steps.length || procedure.steps.some(s => s.op === "require_setup");
+  $("abort-proc").disabled = !running;
+  for (const button of $("proc-steps").querySelectorAll("button")) {
+    const index = Number(button.dataset.index);
+    button.disabled = busy || running || (button.dataset.action === "up" && index === 0)
+      || (button.dataset.action === "down" && index === procedure.steps.length - 1)
+      || (button.dataset.action === "run" && procedure.steps[index]?.op === "require_setup");
+  }
+  for (const button of $("proc-list").querySelectorAll("button")) button.disabled = busy || running;
+}
+
+function describeStep(s) {
+  if (s.op === "home_valve") return `${valveNames[s.name] || s.name}: поиск HOME по одному концевику, затем отход`;
+  if (s.op === "set_valve") return `${valveNames[s.name] || s.name} → сохранённое положение ${s.position}${s.feedrate != null ? "; скорость " + s.feedrate + " ед/мин" : ""}${s.acceleration != null ? "; ускорение " + s.acceleration : ""}`;
+  if (s.op === "home") return `Последовательно: ${s.axes?.join(", ") || "все оси"}`;
+  if (s.op === "move") return `${s.axis}: ${s.to != null ? "в координату " + s.to : "на " + s.by} ${s.units === "steps" ? "шагов" : "ед. оси"}${s.feedrate != null ? "; скорость " + s.feedrate : ""}`;
+  if (s.op === "move_multi") return `Совместно: ${Object.entries(s.axes).map(([a, n]) => `${a} → ${n}`).join("; ")}${s.relative ? " (смещения)" : ""}`;
+  if (s.op === "pump") return `${pumpNames[s.name] || s.name}: ${s.volume_ul} мкл; ${s.flow_ul_min} мкл/мин; ${s.direction === "aspirate" ? "забор" : "подача"}`;
+  if (s.op === "pump_multi") return Object.entries(s.pumps).map(([name, d]) => `${pumpNames[name] || name}: ${d.volume_ul} мкл, ${d.flow_ul_min} мкл/мин`).join("; ");
+  if (s.op === "dwell") return `${s.seconds} с`;
+  if (s.op === "log" || s.op === "require_setup") return s.message;
+  if (s.op === "checkpoint") return s.name;
+  if (s.op === "require_reference") return `Проверить нули: ${s.axes.join(", ")}`;
+  if (s.op === "repeat") return `${s.procedure} × ${s.times}`;
+  if (s.op === "call") return `${s.procedure}; параметры: ${JSON.stringify(s.parameters || {})}`;
+  if (s.op === "motors") return `${s.enabled ? "Удерживать" : "Отключить удержание, сбросить привязку"}: ${s.axes?.join(", ") || "все оси"}`;
+  if (s.op === "read_sensors") return "Прочитать настроенные датчики один раз";
+  return JSON.stringify(s);
 }
 
 function renderSteps() {
-  stepsList.replaceChildren();
+  $("proc-steps").replaceChildren();
+  if (!procedure.steps.length) $("proc-steps").append(el("li", "Добавьте первое действие ниже.", "empty-steps"));
   procedure.steps.forEach((step, index) => {
-    const item = document.createElement("li");
-    item.className = "procedure-step";
-    const summary = document.createElement("code");
-    summary.textContent = `${step.op} — ${describeStep(step)}`;
-    const actions = document.createElement("div");
-    actions.className = "step-actions";
-    for (const [action, label, disabled] of [
-      ["up", "↑", index === 0],
-      ["down", "↓", index === procedure.steps.length - 1],
-      ["remove", "Remove", false],
-      ["run", "Run only this step", false],
-    ]) {
-      const button = document.createElement("button");
+    const item = el("li", undefined, "procedure-step");
+    item.dataset.stepIndex = index;
+    item.classList.toggle("needs-setup", step.op === "require_setup");
+    item.classList.toggle("editing", index === editing);
+    item.append(el("strong", step.title || opNames[step.op] || step.op), el("p", describeStep(step), "step-description"));
+    const actions = el("div", undefined, "step-actions");
+    for (const [action, label] of [["up", "↑"], ["down", "↓"], ["edit", "Изменить"], ["copy", "Копия"], ["remove", "Удалить"], ["run", "Проверить этот шаг"]]) {
+      const button = el("button", label);
       button.type = "button";
       button.dataset.action = action;
-      button.dataset.index = String(index);
-      button.textContent = label;
-      button.disabled = disabled;
+      button.dataset.index = index;
       actions.append(button);
     }
-    item.append(summary, actions);
-    stepsList.append(item);
+    item.append(actions);
+    $("proc-steps").append(item);
   });
   syncEditor();
 }
 
-function setProcedure(value) {
+function resetStepEditor() {
+  editing = null;
+  $("step-title").value = "";
+  $("step-builder-title").textContent = "Добавить шаг";
+  $("add-step").textContent = "Добавить шаг";
+  $("cancel-step-edit").hidden = true;
+  renderStepFields();
+}
+
+function setProcedure(value, saved = true) {
+  if (!value || typeof value !== "object" || !Array.isArray(value.steps)) throw new Error("У процедуры должен быть список steps");
   procedure = structuredClone(value);
   procedure.parameters ||= {};
-  procedure.steps ||= [];
-  nameInput.value = procedure.name;
-  descriptionInput.value = procedure.description || "";
-  draftInput.checked = Boolean(procedure.draft);
-  const defaults = {};
-  for (const [key, definition] of Object.entries(procedure.parameters)) {
-    if (definition.default !== null && definition.default !== undefined) defaults[key] = definition.default;
-  }
-  parameters.value = JSON.stringify(defaults, null, 2);
-  renderParameterFields(defaults);
+  $("proc-name").value = procedure.name;
+  $("proc-title").value = procedure.title || "";
+  $("proc-description").value = procedure.description || "";
+  $("proc-draft").checked = Boolean(procedure.draft);
+  resetStepEditor();
+  renderParameterFields();
   renderSteps();
+  savedText = saved ? JSON.stringify(procedure) : "";
 }
 
-function renderParameterFields(values) {
-  parameterFields.replaceChildren();
-  const entries = Object.entries(procedure.parameters);
-  if (!entries.length) {
-    parameterFields.textContent = "This procedure has no run parameters.";
-    return;
-  }
-  for (const [name, definition] of entries) {
-    const label = document.createElement("label");
-    label.className = "parameter-field";
-    label.append(document.createTextNode(name));
-    let input;
+function mayReplaceProcedure() {
+  syncHeader();
+  return (editing === null && JSON.stringify(procedure) === savedText)
+    || window.confirm("В редакторе есть несохранённые изменения. Открыть другую процедуру и потерять их?");
+}
+
+function renderParameterFields() {
+  const values = {};
+  $("proc-parameter-fields").replaceChildren();
+  for (const [name, definition] of Object.entries(procedure.parameters)) {
+    const label = el("label", name, "parameter-field");
+    const input = definition.type === "boolean" ? el("select") : el("input");
     if (definition.type === "boolean") {
-      input = document.createElement("select");
-      for (const [value, text] of [["", "required"], ["true", "true"], ["false", "false"]]) {
-        const option = document.createElement("option");
-        option.value = value;
-        option.textContent = text;
-        input.append(option);
+      for (const [v, text] of [["", "Не задано"], ["true", "Да"], ["false", "Нет"]]) {
+        const option = el("option", text); option.value = v; input.append(option);
       }
-      if (name in values) input.value = String(values[name]);
     } else {
-      input = document.createElement("input");
       input.type = ["number", "integer"].includes(definition.type) ? "number" : "text";
-      if (definition.type === "integer") input.step = "1";
-      else if (definition.type === "number") input.step = "any";
-      if (definition.minimum !== null && definition.minimum !== undefined) input.min = definition.minimum;
-      if (definition.maximum !== null && definition.maximum !== undefined) input.max = definition.maximum;
-      if (name in values) input.value = values[name];
-      input.placeholder = definition.default === null || definition.default === undefined ? "required" : "";
+      input.step = definition.type === "integer" ? "1" : "any";
+      if (definition.minimum != null) input.min = definition.minimum;
+      if (definition.maximum != null) input.max = definition.maximum;
     }
+    if (definition.default != null) { values[name] = definition.default; input.value = definition.default; }
     input.dataset.parameter = name;
     input.dataset.type = definition.type;
-    label.append(input);
-    if (definition.description) {
-      const help = document.createElement("small");
-      help.textContent = definition.description;
-      label.append(help);
-    }
-    parameterFields.append(label);
+    label.append(input, el("small", definition.description));
+    $("proc-parameter-fields").append(label);
   }
+  if (!Object.keys(procedure.parameters).length) $("proc-parameter-fields").textContent = "У этой процедуры нет параметров запуска.";
+  $("proc-parameters").value = JSON.stringify(values, null, 2);
 }
 
-parameterFields?.addEventListener("input", () => {
+$("proc-parameter-fields").addEventListener("input", () => {
   const values = {};
-  for (const input of parameterFields.querySelectorAll("[data-parameter]")) {
+  for (const input of $("proc-parameter-fields").querySelectorAll("[data-parameter]")) {
     if (input.value === "") continue;
-    if (input.dataset.type === "number") values[input.dataset.parameter] = Number(input.value);
-    else if (input.dataset.type === "integer") values[input.dataset.parameter] = Number.parseInt(input.value, 10);
-    else if (input.dataset.type === "boolean") values[input.dataset.parameter] = input.value === "true";
-    else values[input.dataset.parameter] = input.value;
+    const type = input.dataset.type;
+    values[input.dataset.parameter] = type === "boolean" ? input.value === "true" : ["number", "integer"].includes(type) ? Number(input.value) : input.value;
   }
-  parameters.value = JSON.stringify(values, null, 2);
+  $("proc-parameters").value = JSON.stringify(values, null, 2);
 });
 
-async function openProcedure(name) {
-  setProcedure(await api.procedure(name));
-  show(procedure.draft
-    ? "Draft loaded. Complete execution is blocked; individual steps can be commissioned deliberately."
-    : "Executable procedure loaded.");
-}
-
-async function reload() {
-  list.textContent = "loading…";
-  try {
-    const procedures = await api.procedures();
-    knownProcedures = procedures.filter((item) => item.ok).map((item) => item.name);
-    list.replaceChildren();
-    for (const itemData of procedures) {
-      const item = document.createElement("li");
-      if (!itemData.ok) {
-        item.textContent = `${itemData.file} — ${itemData.error}`;
-      } else {
-        const open = document.createElement("button");
-        open.type = "button";
-        open.dataset.open = itemData.name;
-        open.textContent = itemData.name;
-        item.append(open, ` — ${itemData.description || ""} (${itemData.steps} steps)`);
-        if (itemData.draft) {
-          const badge = document.createElement("strong");
-          badge.textContent = " DRAFT";
-          item.append(badge);
-        }
-      }
-      list.append(item);
+function field(key, title, value = "", choices = null) {
+  const label = el("label", title);
+  const input = choices ? el("select") : el("input");
+  input.id = `step-${key}`;
+  if (choices) {
+    for (const choice of choices) {
+      const [v, text] = Array.isArray(choice) ? choice : [choice, choice];
+      const option = el("option", text); option.value = v; input.append(option);
     }
-  } catch (error) { list.textContent = `Failed to load: ${error.message}`; }
-}
-
-function inputField(label, id, value = "", type = "text") {
-  return `<label>${label}<input id="${id}" type="${type}" value="${value}"></label>`;
-}
-
-function renderStepFields() {
-  const axes = hardware.device_map.axes.map((axis) => axis.marlin_axis);
-  const valves = hardware.device_map.valves.map((valve) => valve.name);
-  if (stepOp.value === "move") {
-    stepFields.innerHTML = `<label>Axis<select id="step-axis">${optionList(axes)}</select></label>
-      <label>Movement<select id="step-move-kind"><option value="by">Relative (by)</option><option value="to">Absolute (to)</option></select></label>
-      ${inputField("Value or \${parameter}", "step-value")}${inputField("Feedrate (optional)", "step-feedrate")}
-      <label>Displacement units<select id="step-units"><option value="axis">mm/deg</option><option value="steps">STEP pulses</option></select></label>
-      <label>Speed units<select id="step-speed-units"><option value="axis/min">axis units/min</option><option value="axis/s">axis units/s</option><option value="steps/s">STEP pulses/s</option></select></label>
-      ${inputField("Acceleration (optional, axis units/s²)", "step-accel")}`;
-  } else if (stepOp.value === "home_valve") {
-    stepFields.innerHTML = `<label>Valve<select id="step-valve">${optionList(valves)}</select></label>`;
-  } else if (stepOp.value === "set_valve") {
-    stepFields.innerHTML = `<label>Valve<select id="step-valve">${optionList(valves)}</select></label>
-      <label>Position<select id="step-position"><option value="A">A / position 1</option><option value="B">B / position 2</option></select></label>`;
-  } else if (stepOp.value === "home") {
-    stepFields.innerHTML = inputField("Axes, comma separated (empty = all)", "step-axes");
-  } else if (stepOp.value === "dwell") {
-    stepFields.innerHTML = inputField("Seconds or \${parameter}", "step-seconds", "1");
-  } else if (stepOp.value === "log") {
-    stepFields.innerHTML = inputField("Message", "step-message");
-  } else if (stepOp.value === "checkpoint") {
-    stepFields.innerHTML = inputField("Checkpoint name", "step-checkpoint");
-  } else if (stepOp.value === "call") {
-    stepFields.innerHTML = `<label>Procedure<select id="step-procedure">${optionList(knownProcedures.filter((name) => name !== procedure.name))}</select></label>
-      ${inputField("Child parameters (JSON)", "step-call-parameters", "{}")}
-      <small id="step-call-help"></small>`;
-    document.getElementById("step-procedure")?.addEventListener("change", fillCallParameterTemplate);
-    fillCallParameterTemplate();
-  } else if (stepOp.value === "move_multi") {
-    stepFields.innerHTML = `${inputField("Axes JSON", "step-axes-json", "{&quot;X&quot;: 1, &quot;Y&quot;: 2}")}
-      ${inputField("Feedrate (optional)", "step-feedrate")}
-      ${inputField("Nominal duration s (instead of feedrate)", "step-duration")}
-      ${inputField("Acceleration (optional)", "step-accel")}
-      <label class="inline-check"><input id="step-relative" type="checkbox"> Relative</label>`;
-  } else if (stepOp.value === "pump") {
-    stepFields.innerHTML = `<label>Pump<select id="step-pump">${optionList((hardware.device_map.pumps || []).map(p => p.name))}</select></label>
-      ${inputField("Volume µL", "step-volume")}${inputField("Flow µL/min", "step-flow")}
-      <label>Direction<select id="step-direction"><option value="dispense">Dispense</option><option value="aspirate">Aspirate</option></select></label>
-      ${inputField("Acceleration (optional)", "step-accel")}`;
-  } else if (stepOp.value === "motors") {
-    stepFields.innerHTML = `${inputField("Axes, comma separated (empty = all)", "step-axes")}
-      <label>Action<select id="step-enabled"><option value="false">Release (reference lost)</option><option value="true">Enable</option></select></label>`;
-  } else if (stepOp.value === "pump_multi") {
-    stepFields.replaceChildren();
-    for (const pump of hardware.device_map.pumps || []) {
-      const row = document.createElement("fieldset"); row.dataset.pumpDose = pump.name;
-      const legend = document.createElement("legend"); legend.textContent = pump.name; row.append(legend);
-      for (const [key, title, type] of [["selected", "Include", "checkbox"], ["volume_ul", "Volume µL", "text"], ["flow_ul_min", "Flow µL/min", "text"]]) {
-        const label = document.createElement("label"); label.textContent = title;
-        const input = document.createElement("input"); input.type = type; input.dataset.doseField = key; label.append(input); row.append(label);
-      }
-      const select = document.createElement("select"); select.dataset.doseField = "direction";
-      for (const name of ["dispense", "aspirate"]) { const option = document.createElement("option"); option.value = name; option.textContent = name; select.append(option); }
-      row.append(select); stepFields.append(row);
+    if (value !== "" && ![...input.options].some(o => o.value === String(value))) {
+      const option = el("option", `${value} (нет в текущем профиле)`); option.value = value; input.append(option);
     }
-    const help = document.createElement("small"); help.textContent = "Select ≥2 calibrated pumps. volume/flow must give the same nominal duration; acceleration changes actual duration."; stepFields.append(help);
-  } else if (stepOp.value === "seek") {
-    stepFields.innerHTML = `<label>Axis<select id="step-axis">${optionList(axes)}</select></label>
-      ${inputField("Verified probe channel", "step-channel")}${inputField("Maximum relative search (axis units)", "step-value")}
-      ${inputField("Feedrate (axis units/min)", "step-feedrate")}
-      <label><input type="checkbox" id="step-zero"> Establish zero at contact</label><small>Requires bench-verified G38.2 support; input must be released.</small>`;
-  } else if (stepOp.value === "read_sensors") {
-    stepFields.textContent = "Read configured sources once and add report to event log.";
-  } else if (["calibrate_valve", "test_reference"].includes(stepOp.value)) {
-    stepFields.innerHTML = `<label>Axis<select id="step-axis">${optionList(axes)}</select></label>
-      ${inputField("Verified shared probe channel", "step-channel")}
-      ${inputField(stepOp.value === "calibrate_valve" ? "Maximum search distance" : "Round trip displacement (signed away from home)", "step-value")}
-      ${inputField("Feedrate (axis units/min)", "step-feedrate")}
-      ${inputField("Backoff (positive axis units)", "step-backoff")}
-      ${inputField("Repeats (1–20)", "step-repeats", "3")}
-      ${stepOp.value === "test_reference" ? inputField("Slow reference feedrate", "step-reference-feedrate") + inputField("Tolerance STEP pulses", "step-tolerance") + inputField("Trial acceleration (optional)", "step-accel") : ""}
-      <small>Firmware-stopped contact search required. Initial input must be released. Reports do not automatically change configuration.</small>`;
+  } else input.type = "text";
+  if (value != null && value !== "") input.value = String(value);
+  label.append(input);
+  $("step-fields").append(label);
+  return input;
+}
+
+function help(text) { $("step-fields").append(el("p", text, "hint step-help")); }
+function axisChoices() { return axes().map(a => [a.marlin_axis, `${a.marlin_axis} · ${a.name} (${a.units})`]); }
+function valveChoices() { return valves().map(v => [v.name, `${valveNames[v.name] || v.name} · ${v.axis}`]); }
+function pumpChoices() { return pumps().map(p => [p.name, `${pumpNames[p.name] || p.name} · ${p.axis}`]); }
+function speedFields(s) { field("feedrate", "Скорость, ед. оси/мин (пусто — из профиля)", s.feedrate); field("acceleration", "Ускорение, ед. оси/с² (необязательно)", s.acceleration); }
+
+function renderStepFields(s = {}) {
+  $("step-fields").replaceChildren();
+  const op = $("step-op").value;
+  if (op === "set_valve" || op === "home_valve") {
+    const selectedValve = field("name", "Кран", s.name, valveChoices());
+    if (op === "set_valve") {
+      const position = field("position", "Сохранённая позиция", s.position || "A", []);
+      const refreshPositions = () => {
+        const valve = valves().find(v => v.name === selectedValve.value);
+        const choices = [["A", "A · положение 1"], ["B", "B · положение 2"], ...Object.entries(valve?.position_names || {}).map(([name, slot]) => [name, `${name} (${slot})`])];
+        const previous = position.value || s.position || "A";
+        position.replaceChildren(...choices.map(([name, title]) => { const option = el("option", title); option.value = name; return option; }));
+        if (choices.some(([name]) => name === previous)) position.value = previous;
+      };
+      selectedValve.addEventListener("change", refreshPositions);
+      refreshPositions();
+      speedFields(s);
+    }
+    help("HOME — ноль по одному микрику. Рабочие A/B — сохранённые смещения от нуля. Позиции и параметры поиска HOME настраиваются на странице кранов.");
+  } else if (["home", "motors", "require_reference"].includes(op)) {
+    field("axes", "Оси через запятую", s.axes?.join(",") ?? (op === "motors" ? "" : "X,Y"));
+    if (op === "motors") field("enabled", "Действие", String(s.enabled ?? false), [["false", "Отключить удержание"], ["true", "Включить удержание"]]);
+    help(op === "require_reference" ? "Проверяет привязку без движения. Ноль автоматически не устанавливает." : op === "home" ? "Home использует сохранённую калибровку personal. Пустое поле — все узлы с механическим HOME, без вращающегося U." : "Пустое поле — все моторы. После отключения удержания координаты теряют привязку; перед следующим движением потребуется Home.");
+  } else if (op === "move") {
+    field("axis", "Ось", s.axis, axisChoices());
+    field("kind", "Перемещение", s.to != null ? "to" : "by", [["to", "В координату"], ["by", "На смещение"]]);
+    field("value", "Величина или ${parameter}", s.to ?? s.by);
+    speedFields(s);
+    field("units", "Единицы перемещения", s.units || "axis", [["axis", "Единицы оси из профиля"], ["steps", "Импульсы STEP"]]);
+    field("speed_units", "Единицы скорости", s.speed_units || "axis/min", ["axis/min", "axis/s", "steps/s"]);
+    help("Краны перемещаются отдельным действием «Положение крана». Единицы оси могут отличаться от градусов поворота выходного редуктора.");
+  } else if (op === "move_multi") {
+    const grid = el("div", undefined, "multi-axis-fields");
+    for (const axis of axes().filter(a => !valves().some(v => v.axis === a.marlin_axis))) {
+      const row = el("label", `${axis.marlin_axis} · ${axis.name} (${axis.units})`);
+      const input = el("input"); input.dataset.multiAxis = axis.marlin_axis; input.placeholder = "Пусто — не участвует"; input.value = s.axes?.[axis.marlin_axis] ?? "";
+      row.append(input); grid.append(row);
+    }
+    $("step-fields").append(grid);
+    field("relative", "Координаты", String(s.relative ?? false), [["false", "Абсолютные"], ["true", "Смещения"]]);
+    speedFields(s);
+    field("duration_s", "Время, с (вместо скорости)", s.duration_s);
+    help("Один согласованный ход с общим завершением. Ускорение добавляет время. Это не параллельный поиск концевиков.");
+  } else if (op === "pump") {
+    field("name", "Насос", s.name, pumpChoices());
+    field("volume_ul", "Объём, мкл", s.volume_ul);
+    field("flow_ul_min", "Расход, мкл/мин", s.flow_ul_min);
+    field("direction", "Направление", s.direction || "dispense", [["dispense", "Подача"], ["aspirate", "Забор"]]);
+    field("acceleration", "Ускорение, ед. оси/с² (необязательно)", s.acceleration);
+    help("Для подачи объёма нужен откалиброванный коэффициент мкл/ед. оси.");
+  } else if (op === "pump_multi") {
+    for (const pump of pumps()) {
+      const dose = s.pumps?.[pump.name] || {};
+      const row = el("fieldset"); row.dataset.pump = pump.name;
+      row.append(el("legend", `${pumpNames[pump.name] || pump.name} · ${pump.axis}`));
+      for (const [key, title] of [["volume_ul", "Объём, мкл"], ["flow_ul_min", "Расход, мкл/мин"]]) {
+        const label = el("label", title); const input = el("input"); input.dataset.doseField = key; input.value = dose[key] ?? ""; label.append(input); row.append(label);
+      }
+      const select = el("select"); select.dataset.doseField = "direction";
+      for (const [v, text] of [["dispense", "Подача"], ["aspirate", "Забор"]]) { const option = el("option", text); option.value = v; select.append(option); }
+      select.value = dose.direction || "dispense"; row.append(select); $("step-fields").append(row);
+    }
+    field("acceleration", "Ускорение (необязательно)", s.acceleration);
+    help("Заполните объём и расход минимум двух насосов. Время объём/расход должно совпадать; пустые насосы не участвуют.");
+  } else if (op === "dwell") field("seconds", "Пауза, с", s.seconds ?? 1);
+  else if (op === "log" || op === "require_setup") {
+    field("message", op === "log" ? "Текст сообщения" : "Что требуется настроить", s.message);
+    if (op === "require_setup") help("Этот пункт сохраняет незавершённую часть плана. Запуск будет запрещён, пока вы не замените или не удалите его.");
+  } else if (op === "checkpoint") field("name", "Отметка этапа", s.name);
+  else if (op === "call" || op === "repeat") {
+    field("procedure", "Процедура", s.procedure, knownProcedures.filter(p => p.ok && p.name !== procedure.name).map(p => [p.name, p.title || p.name]));
+    field("parameters", "Параметры дочерней процедуры (JSON)", JSON.stringify(s.parameters || {}));
+    if (op === "repeat") field("times", "Число повторений", s.times ?? 1);
+  } else if (op === "read_sensors") help("Прочитать настроенные источники и сохранить ответ в результате шага.");
+  else if (["seek", "test_reference"].includes(op)) {
+    field("axis", "Ось", s.axis, axisChoices());
+    field("channel", "Проверенное имя входа", s.channel);
+    field("by", "Предельное смещение со знаком", s.by);
+    field("feedrate", "Скорость, ед. оси/мин", s.feedrate);
+    if (op === "seek") field("zero", "Установить ноль при касании", String(s.zero ?? false), [["false", "Нет"], ["true", "Да"]]);
+    else {
+      field("reference_feedrate", "Скорость точного подхода", s.reference_feedrate);
+      field("backoff", "Отход", s.backoff);
+      field("tolerance_pulses", "Допуск, импульсы STEP", s.tolerance_pulses);
+      field("repeats", "Повторения", s.repeats ?? 3);
+      field("acceleration", "Ускорение (необязательно)", s.acceleration);
+    }
+    help("Требуется подтверждённый firmware-stopped probe. Для кранов используйте Home крана.");
   }
 }
 
-async function fillCallParameterTemplate() {
-  const select = document.getElementById("step-procedure");
-  const input = document.getElementById("step-call-parameters");
-  const help = document.getElementById("step-call-help");
-  if (!select?.value || !input) return;
-  try {
-    const child = await api.procedure(select.value);
-    const defaults = {};
-    const required = [];
-    for (const [name, definition] of Object.entries(child.parameters || {})) {
-      if (definition.default === null || definition.default === undefined) required.push(name);
-      else defaults[name] = definition.default;
-    }
-    input.value = JSON.stringify(defaults);
-    if (help) help.textContent = required.length
-      ? `Required child parameters to add: ${required.join(", ")}`
-      : "All child parameters have defaults.";
-  } catch (error) {
-    if (help) help.textContent = `Cannot load child parameters: ${error.message}`;
-  }
-}
-
-function numberOrReference(value, required = true) {
-  const text = value.trim();
-  if (!text && !required) return undefined;
+function number(value, required = true) {
+  const text = String(value ?? "").trim();
+  if (!text) { if (!required) return undefined; throw new Error("Числовое поле не заполнено"); }
   if (/^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(text)) return text;
-  const number = Number(text);
-  if (!Number.isFinite(number)) throw new Error(`Expected a number or parameter reference, got ${text || "empty value"}`);
-  return number;
+  const n = Number(text);
+  if (!Number.isFinite(n)) throw new Error(`Ожидается число или ссылка на параметр: ${text}`);
+  return n;
 }
 
 function buildStep() {
-  if (stepOp.value === "move") {
-    const kind = document.getElementById("step-move-kind").value;
-    const step = { op: "move", axis: document.getElementById("step-axis").value };
-    step[kind] = numberOrReference(document.getElementById("step-value").value);
-    const feedrate = numberOrReference(document.getElementById("step-feedrate").value, false);
-    if (feedrate !== undefined) step.feedrate = feedrate;
-    step.units = document.getElementById("step-units").value;
-    step.speed_units = document.getElementById("step-speed-units").value;
-    const acceleration = numberOrReference(document.getElementById("step-accel").value, false);
-    if (acceleration !== undefined) step.acceleration = acceleration;
-    return step;
+  const op = $("step-op").value;
+  const s = { op };
+  const value = key => $(`step-${key}`)?.value;
+  const numeric = (keys, required = true) => { for (const key of keys) { const n = number(value(key), required); if (n !== undefined) s[key] = n; } };
+  if ($("step-title").value.trim()) s.title = $("step-title").value.trim();
+  if (["home_valve", "set_valve", "checkpoint", "pump"].includes(op)) { s.name = value("name"); if (!s.name) throw new Error("Выберите узел / укажите имя"); }
+  if (op === "set_valve") { s.position = value("position"); numeric(["feedrate", "acceleration"], false); }
+  if (["home", "motors", "require_reference"].includes(op)) { const a = value("axes").split(",").map(v => v.trim()).filter(Boolean); s.axes = a.length ? a : null; if (op === "require_reference" && !a.length) throw new Error("Укажите оси для проверки нулей"); }
+  if (op === "motors") s.enabled = value("enabled") === "true";
+  if (op === "move") { s.axis = value("axis"); s[value("kind")] = number(value("value")); s.units = value("units"); s.speed_units = value("speed_units"); numeric(["feedrate", "acceleration"], false); }
+  if (op === "move_multi") {
+    s.axes = {};
+    for (const input of $("step-fields").querySelectorAll("[data-multi-axis]")) { if (input.value.trim()) s.axes[input.dataset.multiAxis] = number(input.value); }
+    if (Object.keys(s.axes).length < 2) throw new Error("Для совместного движения укажите минимум две оси");
+    s.relative = value("relative") === "true"; numeric(["feedrate", "duration_s", "acceleration"], false);
   }
-  if (stepOp.value === "set_valve") return { op: "set_valve", name: document.getElementById("step-valve").value, position: document.getElementById("step-position").value };
-  if (stepOp.value === "home_valve") return { op: "home_valve", name: document.getElementById("step-valve").value };
-  if (stepOp.value === "home") {
-    const axes = document.getElementById("step-axes").value.split(",").map((value) => value.trim()).filter(Boolean);
-    return { op: "home", axes: axes.length ? axes : null };
-  }
-  if (stepOp.value === "dwell") return { op: "dwell", seconds: numberOrReference(document.getElementById("step-seconds").value) };
-  if (stepOp.value === "log") return { op: "log", message: document.getElementById("step-message").value };
-  if (stepOp.value === "checkpoint") return { op: "checkpoint", name: document.getElementById("step-checkpoint").value };
-  if (stepOp.value === "call") return {
-    op: "call",
-    procedure: document.getElementById("step-procedure").value,
-    parameters: JSON.parse(document.getElementById("step-call-parameters").value || "{}"),
-  };
-  if (stepOp.value === "move_multi") {
-    const step = { op: "move_multi", axes: JSON.parse(document.getElementById("step-axes-json").value), relative: document.getElementById("step-relative").checked };
-    const feedrate = numberOrReference(document.getElementById("step-feedrate").value, false);
-    if (feedrate !== undefined) step.feedrate = feedrate;
-    const duration = numberOrReference(document.getElementById("step-duration").value, false);
-    if (duration !== undefined) step.duration_s = duration;
-    const acceleration = numberOrReference(document.getElementById("step-accel").value, false);
-    if (acceleration !== undefined) step.acceleration = acceleration;
-    return step;
-  }
-  if (stepOp.value === "pump") {
-    const step = { op: "pump", name: document.getElementById("step-pump").value,
-      volume_ul: numberOrReference(document.getElementById("step-volume").value),
-      flow_ul_min: numberOrReference(document.getElementById("step-flow").value),
-      direction: document.getElementById("step-direction").value };
-    const acceleration = numberOrReference(document.getElementById("step-accel").value, false);
-    if (acceleration !== undefined) step.acceleration = acceleration;
-    return step;
-  }
-  if (stepOp.value === "motors") {
-    const axes = document.getElementById("step-axes").value.split(",").map(s => s.trim()).filter(Boolean);
-    return { op: "motors", enabled: document.getElementById("step-enabled").value === "true", axes: axes.length ? axes : null };
-  }
-  if (stepOp.value === "pump_multi") {
-    const pumps = {};
-    for (const row of stepFields.querySelectorAll("[data-pump-dose]")) {
-      if (!row.querySelector('[data-dose-field="selected"]').checked) continue;
-      pumps[row.dataset.pumpDose] = { volume_ul: numberOrReference(row.querySelector('[data-dose-field="volume_ul"]').value),
-        flow_ul_min: numberOrReference(row.querySelector('[data-dose-field="flow_ul_min"]').value),
-        direction: row.querySelector('[data-dose-field="direction"]').value };
+  if (op === "pump") { numeric(["volume_ul", "flow_ul_min"]); s.direction = value("direction"); numeric(["acceleration"], false); }
+  if (op === "pump_multi") {
+    s.pumps = {};
+    for (const row of $("step-fields").querySelectorAll("[data-pump]")) {
+      const dose = key => row.querySelector(`[data-dose-field="${key}"]`).value;
+      if (!dose("volume_ul").trim() && !dose("flow_ul_min").trim()) continue;
+      s.pumps[row.dataset.pump] = { volume_ul: number(dose("volume_ul")), flow_ul_min: number(dose("flow_ul_min")), direction: dose("direction") };
     }
-    return { op: "pump_multi", pumps };
+    if (Object.keys(s.pumps).length < 2) throw new Error("Укажите минимум два насоса");
+    numeric(["acceleration"], false);
   }
-  if (stepOp.value === "read_sensors") return { op: "read_sensors" };
-  if (stepOp.value === "seek") return { op: "seek", axis: document.getElementById("step-axis").value,
-    channel: document.getElementById("step-channel").value, by: numberOrReference(document.getElementById("step-value").value),
-    feedrate: numberOrReference(document.getElementById("step-feedrate").value), zero: document.getElementById("step-zero").checked };
-  if (["calibrate_valve", "test_reference"].includes(stepOp.value)) {
-    const step = { op: stepOp.value, axis: document.getElementById("step-axis").value,
-      channel: document.getElementById("step-channel").value, feedrate: numberOrReference(document.getElementById("step-feedrate").value),
-      backoff: numberOrReference(document.getElementById("step-backoff").value), repeats: Number(document.getElementById("step-repeats").value) };
-    if (step.op === "calibrate_valve") step.search_distance = numberOrReference(document.getElementById("step-value").value);
-    else { step.by = numberOrReference(document.getElementById("step-value").value);
-      step.reference_feedrate = numberOrReference(document.getElementById("step-reference-feedrate").value);
-      step.tolerance_pulses = numberOrReference(document.getElementById("step-tolerance").value); }
-    if (step.op === "test_reference") {
-      const acceleration = numberOrReference(document.getElementById("step-accel").value, false);
-      if (acceleration !== undefined) step.acceleration = acceleration;
-    }
-    return step;
+  if (op === "dwell") numeric(["seconds"]);
+  if (["log", "require_setup"].includes(op)) { s.message = value("message"); if (!s.message.trim()) throw new Error("Заполните текст шага"); }
+  if (op === "call" || op === "repeat") { s.procedure = value("procedure"); s.parameters = JSON.parse(value("parameters") || "{}"); }
+  if (op === "repeat") numeric(["times"]);
+  if (["seek", "test_reference"].includes(op)) {
+    s.axis = value("axis"); s.channel = value("channel"); numeric(["by", "feedrate"]);
+    if (op === "seek") s.zero = value("zero") === "true";
+    else { numeric(["reference_feedrate", "backoff", "tolerance_pulses", "repeats"]); numeric(["acceleration"], false); }
   }
-  throw new Error(`Unsupported operation ${stepOp.value}`);
+  return s;
 }
 
 function parseParameters() {
-  const value = JSON.parse(parameters.value || "{}");
-  if (!value || Array.isArray(value) || typeof value !== "object") throw new Error("Run parameters must be a JSON object");
-  return value;
+  const data = JSON.parse($("proc-parameters").value || "{}");
+  if (!data || Array.isArray(data) || typeof data !== "object") throw new Error("Параметры запуска должны быть объектом JSON");
+  return data;
+}
+
+async function reload() {
+  knownProcedures = await api.procedures();
+  $("proc-list").replaceChildren();
+  for (const p of knownProcedures) {
+    const item = el("li");
+    if (!p.ok) item.textContent = `${p.file}: ${p.error}`;
+    else {
+      const button = el("button", p.title || p.name); button.type = "button"; button.dataset.open = p.name;
+      item.append(button, el("small", `${p.steps} шагов · ${p.draft ? "черновик" : "сценарий"}`));
+      if (p.description) button.title = p.description;
+    }
+    $("proc-list").append(item);
+  }
+  updateButtons();
 }
 
 async function saveCurrent() {
-  syncModelFromHeader();
+  if (editing !== null) throw new Error("Сначала примените или отмените изменение шага");
+  syncHeader();
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(procedure.name)) throw new Error("Имя файла: до 64 латинских букв, цифр, _ и -; первый символ — буква или цифра");
   const saved = await api.saveProcedure(procedure.name, procedure);
   syncEditor();
+  savedText = JSON.stringify(procedure);
   await reload();
   return saved;
 }
 
-list?.addEventListener("click", async (event) => {
+async function action(fn) {
+  if (busy || running) return;
+  busy = true; updateButtons();
+  try { await fn(); }
+  catch (error) { show(error.message); }
+  finally { busy = false; updateButtons(); }
+}
+
+function previewReport(report) {
+  show(report, `Проверено ${report.steps.length} шагов. Команды на аппарат не отправлялись.`);
+  const issues = report.execution_issues || [];
+  if (report.draft) $("proc-feedback").append(el("p", "Черновик: полный запуск отключён."));
+  if (issues.length) {
+    const list = el("ul", undefined, "preview-issues");
+    for (const issue of issues) list.append(el("li", issue
+      .replace(/^step (\d+): /, "Шаг $1: ")
+      .replace("shared_valve_endstop channel is not configured", "Не выбран общий вход концевиков на странице кранов")
+      .replace("valve A/B commissioning required", "Рабочие положения крана A/B ещё не подтверждены")
+      .replace("pump is unknown or uncalibrated", "Насос не определён или не откалиброван по объёму")));
+    $("proc-feedback").append(el("strong", "Что осталось настроить:"), list);
+  } else $("proc-feedback").append(el("p", "Статических ошибок не найдено. Физические позиции проверяются на установке."));
+  const sequence = el("ol");
+  for (const step of report.steps) sequence.append(el("li", `${step.title || opNames[step.op] || step.op}: ${describeStep(step)}`));
+  $("proc-feedback").append(sequence);
+}
+
+$("proc-list").addEventListener("click", event => {
   const button = event.target.closest("button[data-open]");
   if (!button) return;
-  try { await openProcedure(button.dataset.open); }
-  catch (error) { show(`Load failed: ${error.message}`); }
+  if (!mayReplaceProcedure()) return;
+  action(async () => { setProcedure(await api.procedure(button.dataset.open)); show("Процедура открыта. Изменения применяются после сохранения."); });
 });
 
-stepsList?.addEventListener("click", async (event) => {
+$("proc-steps").addEventListener("click", event => {
   const button = event.target.closest("button[data-action]");
-  if (!button) return;
+  if (!button || busy || running) return;
   const index = Number(button.dataset.index);
-  if (button.dataset.action === "remove") procedure.steps.splice(index, 1);
-  if (button.dataset.action === "up" && index > 0) [procedure.steps[index - 1], procedure.steps[index]] = [procedure.steps[index], procedure.steps[index - 1]];
-  if (button.dataset.action === "down" && index < procedure.steps.length - 1) [procedure.steps[index + 1], procedure.steps[index]] = [procedure.steps[index], procedure.steps[index + 1]];
-  if (button.dataset.action === "run") {
-    const confirmed = window.confirm(`Run step ${index + 1} only?\n\n${describeStep(procedure.steps[index])}\n\nThe command will be sent to the connected controller.`);
-    if (!confirmed) return;
-    button.disabled = true;
-    try {
-      await saveCurrent();
-      show(await api.runProcedureStep(procedure.name, index + 1, parseParameters()));
-    } catch (error) { show(`Step refused or failed: ${error.message}`); }
-    finally { button.disabled = false; }
+  const what = button.dataset.action;
+  if (what === "run") {
+    if (!window.confirm(`Выполнить только шаг ${index + 1}?\n\n${describeStep(procedure.steps[index])}\n\nКоманда будет отправлена на подключённый аппарат.`)) return;
+    action(async () => { await saveCurrent(); const report = await api.runProcedureStep(procedure.name, index + 1, parseParameters()); show(report, "Шаг завершён. Проверьте фактическое положение на установке."); await refreshStatus(); });
     return;
   }
+  if (what === "edit") {
+    const step = procedure.steps[index];
+    if (!(step.op in opNames)) { show("Для этого действия используйте JSON в разделе разработчика."); return; }
+    editing = index;
+    $("step-title").value = step.title || "";
+    $("step-op").value = step.op;
+    renderStepFields(step);
+    $("step-builder-title").textContent = `Изменить шаг ${index + 1}`;
+    $("add-step").textContent = "Применить изменение";
+    $("cancel-step-edit").hidden = false;
+    $("step-builder-title").scrollIntoView({ behavior: "smooth", block: "center" });
+    renderSteps(); return;
+  }
+  if (editing !== null) { show("Сначала примените или отмените изменение шага."); return; }
+  if (what === "copy") procedure.steps.splice(index + 1, 0, structuredClone(procedure.steps[index]));
+  if (what === "remove") procedure.steps.splice(index, 1);
+  if (what === "up" && index > 0) [procedure.steps[index - 1], procedure.steps[index]] = [procedure.steps[index], procedure.steps[index - 1]];
+  if (what === "down" && index < procedure.steps.length - 1) [procedure.steps[index + 1], procedure.steps[index]] = [procedure.steps[index], procedure.steps[index + 1]];
   renderSteps();
 });
 
-document.getElementById("new-proc")?.addEventListener("click", () => {
-  setProcedure(emptyProcedure());
-  show("New draft. Add steps, save it, then commission individual steps if needed.");
+$("add-step").addEventListener("click", () => {
+  try {
+    const step = buildStep();
+    if (editing === null) procedure.steps.push(step); else procedure.steps[editing] = step;
+    resetStepEditor(); renderSteps(); show("Шаг применён. Сохраните процедуру.");
+  } catch (error) { show(error.message); }
 });
-
-document.getElementById("export-proc")?.addEventListener("click", () => {
-  syncModelFromHeader();
+$("cancel-step-edit").addEventListener("click", () => { resetStepEditor(); renderSteps(); });
+$("step-op").addEventListener("change", () => renderStepFields());
+$("proc-draft").addEventListener("change", syncEditor);
+$("new-proc").addEventListener("click", () => { if (!mayReplaceProcedure()) return; const p = emptyProcedure(); let i = 1; while (knownProcedures.some(v => v.name === p.name)) p.name = `new_procedure_${i++}`; setProcedure(p, false); show("Новый черновик. Задайте имя и добавьте действия."); });
+$("copy-proc").addEventListener("click", () => {
+  if (editing !== null) { show("Сначала примените или отмените изменение шага."); return; }
+  syncHeader(); const p = structuredClone(procedure); const base = p.name.slice(0, 52); let i = 1;
+  do { p.name = `${base}_copy_${i++}`; } while (knownProcedures.some(v => v.name === p.name));
+  p.title = `${p.title || procedure.name} — копия`; p.draft = true; setProcedure(p, false); show("Копия создана в редакторе. Сохраните её с новым именем.");
+});
+$("save-proc").addEventListener("click", () => action(async () => show(await saveCurrent(), "Процедура сохранена.")));
+$("save-run-defaults").addEventListener("click", () => action(async () => {
+  const values = parseParameters();
+  for (const [name, value] of Object.entries(values)) {
+    if (!(name in procedure.parameters)) throw new Error(`Неизвестный параметр ${name}`);
+    procedure.parameters[name].default = value;
+  }
+  await saveCurrent();
+  show("Параметры сохранены как значения по умолчанию.");
+}));
+$("preview-proc").addEventListener("click", () => action(async () => { await saveCurrent(); previewReport(await api.previewProcedure(procedure.name, parseParameters())); }));
+$("reload-procs").addEventListener("click", () => action(reload));
+$("apply-json").addEventListener("click", () => { try { setProcedure(JSON.parse($("proc-detail").value), false); show("JSON применён в редакторе. Сохраните для проверки формата."); } catch (error) { show(error.message); } });
+$("export-proc").addEventListener("click", () => {
+  syncHeader();
   const url = URL.createObjectURL(new Blob([JSON.stringify(procedure, null, 2)], { type: "application/json" }));
-  const link = document.createElement("a"); link.href = url; link.download = `${procedure.name.replace(/[^A-Za-z0-9_-]/g, "_")}.json`; link.click(); URL.revokeObjectURL(url);
+  const link = el("a"); link.href = url; link.download = `${procedure.name.replace(/[^A-Za-z0-9_-]/g, "_")}.json`; link.click(); URL.revokeObjectURL(url);
+});
+$("run-proc").addEventListener("click", () => {
+  if (!window.confirm(`Запустить всю процедуру «${$("proc-title").value || $("proc-name").value}» на подключённом аппарате?`)) return;
+  action(async () => { await saveCurrent(); show(await api.runProcedure(procedure.name, parseParameters()), "Процедура запущена."); await refreshStatus(); });
+});
+$("abort-proc").addEventListener("click", async () => {
+  try { show(await api.abortProcedure(), "Процедура остановлена. Привязка координат потеряна."); await refreshStatus(); }
+  catch (error) { show(error.message); }
 });
 
-document.getElementById("add-step")?.addEventListener("click", () => {
-  try { procedure.steps.push(buildStep()); renderSteps(); }
-  catch (error) { show(`Cannot add step: ${error.message}`); }
-});
+async function refreshStatus() {
+  try {
+    activeStatus = await api.procedureStatus(); running = activeStatus.running;
+    $("proc-status").textContent = activeStatus.error ? `Ошибка: ${activeStatus.error}` : running ? `Выполняется ${activeStatus.name}: ${activeStatus.step_path || activeStatus.step}` : activeStatus.name ? `Завершено: ${activeStatus.name}` : "Нет запущенной процедуры";
+    updateButtons();
+  } catch { $("proc-status").textContent = "Нет связи с сервером"; }
+}
 
-document.getElementById("apply-json")?.addEventListener("click", () => {
-  try { setProcedure(JSON.parse(editor.value)); show("JSON changes applied locally. Save to validate them."); }
-  catch (error) { show(`Invalid JSON: ${error.message}`); }
-});
-
-document.getElementById("save-proc")?.addEventListener("click", async () => {
-  try { show(await saveCurrent()); }
-  catch (error) { show(`Save failed: ${error.message}`); }
-});
-
-document.getElementById("preview-proc")?.addEventListener("click", async () => {
-  try { await saveCurrent(); show(await api.previewProcedure(procedure.name, parseParameters())); }
-  catch (error) { show(`Preview failed: ${error.message}`); }
-});
-
-document.getElementById("run-proc")?.addEventListener("click", async () => {
-  if (draftInput.checked) { show("Complete run refused locally: clear Draft only after every step has been commissioned."); return; }
-  const confirmed = window.confirm(`Run the complete procedure “${nameInput.value.trim()}”?`);
-  if (!confirmed) return;
-  try { await saveCurrent(); show(await api.runProcedure(procedure.name, parseParameters())); }
-  catch (error) { show(`Run refused: ${error.message}`); }
-});
-
-document.getElementById("abort-proc")?.addEventListener("click", async () => {
-  try { show(await api.abortProcedure()); }
-  catch (error) { show(`Abort failed: ${error.message}`); }
-});
-
-document.getElementById("reload-procs")?.addEventListener("click", reload);
-stepOp?.addEventListener("change", renderStepFields);
-
-Promise.all([api.config(), reload()]).then(([config]) => {
-  hardware = config;
-  renderStepFields();
-  setProcedure(procedure);
-}).catch((error) => show(`Initialization failed: ${error.message}`));
+async function init() {
+  updateButtons();
+  try {
+    hardware = await api.config();
+    await reload();
+    const startup = knownProcedures.find(p => p.name === "startup_draft" && p.ok);
+    setProcedure(startup ? await api.procedure(startup.name) : emptyProcedure());
+    await refreshStatus();
+  } catch (error) { show(`Не удалось загрузить конструктор: ${error.message}`); }
+  finally { busy = false; updateButtons(); }
+}
+init();
+let polling = false;
+setInterval(async () => {
+  if (document.hidden || polling) return;
+  polling = true;
+  try { await refreshStatus(); } finally { polling = false; }
+}, 1000);

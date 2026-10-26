@@ -31,6 +31,8 @@ from flowengine.schemas.procedure import (
     PumpStep,
     ReadSensorsStep,
     ReferenceTestStep,
+    RequireSetupStep,
+    RequireReferenceStep,
     SeekStep,
     ValveCalibrationStep,
 )
@@ -58,6 +60,17 @@ class ProcedureRunner:
         self._step_path: str | None = None
         self._error: str | None = None
         self._results: list[dict[str, object]] = []
+        self.recorder = None
+        self._persistence_error: str | None = None
+
+    def _persist(self):
+        if self.recorder is not None:
+            try:
+                self.recorder({**self.status, "running": False})
+                self._persistence_error = None
+            except Exception as exc:
+                self._persistence_error = str(exc)
+                log.exception("could not persist procedure result")
 
     @property
     def status(self) -> dict[str, object]:
@@ -68,6 +81,7 @@ class ProcedureRunner:
             "step_path": self._step_path,
             "error": self._error,
             "results": list(self._results),
+            "persistence_error": self._persistence_error,
         }
 
     def start(self, proc: Procedure, step_paths: list[str] | None = None) -> None:
@@ -134,6 +148,7 @@ class ProcedureRunner:
                 raise
             finally:
                 self._task = None
+                self._persist()
 
     async def _selected_steps(
         self, name: str, number: int, steps: list[Step], paths: list[str]
@@ -193,13 +208,22 @@ class ProcedureRunner:
             log.exception("procedure %s failed", proc.name)
         else:
             await self._events.publish({"type": "procedure", "name": proc.name, "done": True})
+        finally:
+            self._persist()
 
     async def _execute(self, step: Step) -> None:
-        if isinstance(step, HomeStep):
+        if isinstance(step, RequireSetupStep):
+            raise ProcedureError(f"требуется настройка: {step.message}")
+        elif isinstance(step, RequireReferenceStep):
+            missing = [a for a in step.axes if not self._sender._motion.homed.get(a, False)]
+            if missing:
+                raise ProcedureError("Reference these axes first: " + ", ".join(missing))
+        elif isinstance(step, HomeStep):
             await self._state.transition(
                 State.HOMING, detail=f"procedure home {step.axes or 'all'}"
             )
-            await self._sender.home(step.axes)
+            result = await self._sender.home(step.axes)
+            self._results.append({"step_path": self._step_path, "op": step.op, "result": result})
             await self._state.transition(State.CONNECTED_IDLE, detail="procedure home complete")
         elif isinstance(step, MoveStep):
             await self._state.transition(State.MOVING, detail=f"procedure move {step.axis}")
@@ -219,7 +243,8 @@ class ProcedureRunner:
             await self._state.transition(State.CONNECTED_IDLE, detail="procedure move complete")
         elif isinstance(step, HomeValveStep):
             await self._state.transition(State.HOMING, detail=f"valve Home {step.name}")
-            await self._sender.home_valve(step.name)
+            result = await self._sender.home_valve(step.name)
+            self._results.append({"step_path": self._step_path, "op": step.op, "result": result})
             await self._state.transition(State.CONNECTED_IDLE, detail="valve Home complete")
         elif isinstance(step, SetValveStep):
             valve = next((item for item in self._map.valves if item.name == step.name), None)
@@ -228,7 +253,8 @@ class ProcedureRunner:
             await self._state.transition(
                 State.MOVING, detail=f"valve {step.name} → {step.position}"
             )
-            await self._sender.set_valve(step.name, step.position)
+            async with self._sender.acceleration(step.acceleration, [valve.axis]):
+                await self._sender.set_valve(step.name, step.position, step.feedrate)
             await self._state.transition(State.CONNECTED_IDLE, detail="valve move complete")
         elif isinstance(step, DwellStep):
             await asyncio.sleep(cast(float, step.seconds))

@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from flowengine.app import create_app
 from flowengine.config import AppSettings
+from tests.conftest import use_firmware_home_axes
 
 
 @pytest.fixture
@@ -17,6 +18,7 @@ def client(monkeypatch, tmp_path) -> TestClient:
     settings = AppSettings(mock=True, log_level="WARNING")
     app = create_app(settings)
     with TestClient(app) as c:
+        use_firmware_home_axes(app.state.ctx)
         device = c.get("/api/config").json()["device_map"]
         configured = c.put("/api/valves/config", json={"valves": device["valves"],
                             "shared_valve_endstop": {"channel": "z_min"}})
@@ -224,7 +226,9 @@ def test_profiles_and_racks_can_be_saved(client):
 
 
 def test_procedure_runs_end_to_end(client):
-    response = client.post("/api/procedures/home_all/run")
+    client.put("/api/procedures/smoke_home", json={"name": "smoke_home", "steps": [
+        {"op": "home", "axes": ["X"]}, {"op": "log", "message": "done"}]})
+    response = client.post("/api/procedures/smoke_home/run")
     assert response.status_code == 200, response.text
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
@@ -232,14 +236,9 @@ def test_procedure_runs_end_to_end(client):
         if not status["running"]:
             break
         time.sleep(0.01)
-    assert status == {
-        "running": False,
-        "name": "home_all",
-        "step": 2,
-        "step_path": "home_all step 2",
-        "error": None,
-        "results": [],
-    }
+    assert not status["running"] and status["error"] is None
+    assert status["name"] == "smoke_home" and status["step"] == 2
+    assert status["results"][0]["result"]["X"]["strategy"] == "g28"
 
 
 def test_idempotency_key_dedupes(client):

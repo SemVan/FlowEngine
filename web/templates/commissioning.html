@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel" id="commissioning">
+  <h2>Наладка и передача прибора</h2>
+  <p><a href="/commissioning/guide" target="_blank" rel="noopener">Подробная инструкция: проверки, калибровки и сохранение конфигов</a></p>
+  <p>Сначала сохраните профиль. Измерения и журнал записываются в profiles/ИМЯ.yaml.
+    Сохранение не меняет активные настройки. «Применить» сбрасывает все нули, но сохраняет USB-соединение.</p>
+  <p id="commission-storage"></p>
+  <label>Имя профиля <input id="commission-name" value="bench_instrument"></label>
+  <button id="commission-active">Взять активные настройки</button>
+  <button id="commission-load">Открыть сохранённый профиль</button>
+  <button id="commission-save">Сохранить JSON профиля</button>
+  <button id="commission-apply">Применить сохранённый профиль</button>
+  <p><a href="/config">Таблицы осей, насосов и кранов</a> ·
+    <a href="/valves">Сервисные движения</a> · <a href="/procedures">Редактор процедур</a></p>
+  <fieldset><legend>Одиночный сервисный шаг без нуля</legend>
+    <p>Для первичной проверки выбранного привода. После каждого шага отправляется команда отпускания мотора,
+      прежний ноль теряется. Длина шага задаётся в единицах оси, скорость — в единицах/мин.</p>
+    <label>Привод <select id="commission-service-axis"></select></label>
+    <label>Шаг со знаком <input id="commission-service-delta" type="number" step="any" value="1" min="-20" max="20"></label>
+    <label>Скорость шага <input id="commission-service-speed" type="number" step="any" value="120" min="1" max="120"></label>
+    <label>Контрольный вход M119 <input id="commission-service-channel" value="x_min"></label>
+    <p>Шаг выполняется целиком; вход читается до и после движения. Для U вход датчика не установлен:
+      z_min используется только для контрольного чтения общего входа кранов.</p>
+    <button id="commission-service-read" type="button">Прочитать входы · без движения</button>
+    <button id="commission-service-run" type="button">Выполнить шаг и отпустить мотор</button>
+    <pre id="commission-service-result" aria-live="polite">Выберите привод и проверьте свободный ход.</pre>
+  </fieldset>
+  <details><summary>JSON профиля: пределы, маршруты и журнал</summary>
+    <textarea id="commission-profile" class="json-editor" spellcheck="false"></textarea>
+  </details>
+  <fieldset><legend>Движение и подтверждённый ноль</legend>
+    <p>Ручной ноль нужен только после физической установки механизма в известное положение.
+      Он действует до отпускания мотора, применения профиля, ошибки или перезапуска.</p>
+    <label>Ось <select id="commission-axis"></select></label>
+    <label>Координата нуля <input id="commission-zero" type="number" step="any" value="0"></label>
+    <label>Как установили положение <input id="commission-reference-notes"></label>
+    <button id="commission-reference">Подтвердить физическую координату</button>
+    <label>Перемещение со знаком, единицы оси <input id="commission-delta" type="number" step="any" value="1"></label>
+    <label>Скорость, единицы/мин <input id="commission-feedrate" type="number" step="any" value="60"></label>
+    <button id="commission-jog">Переместить найденную ось с удержанием</button>
+    <button id="commission-position">Прочитать позиции и статус</button>
+  </fieldset>
+  <fieldset><legend>Рабочие положения крана</legend>
+    <p>Сначала HOME через Procedures. Положение A/B здесь — два режима крана, а не оси.
+      Подведите найденную ось, проверьте соединение трубок, прочитайте координату и сохраните оба положения.</p>
+    <label>Кран <select id="commission-valve"></select></label>
+    <label>Координата положения A <input id="commission-valve-a" type="number" step="any"></label>
+    <button id="commission-capture-a">Взять текущую координату в A</button>
+    <label>Координата положения B <input id="commission-valve-b" type="number" step="any"></label>
+    <button id="commission-capture-b">Взять текущую координату в B</button>
+    <label>Какие трубки соединены в каждом положении <input id="commission-valve-notes"></label>
+    <label><input id="commission-valve-confirm" type="checkbox">Оба маршрута физически проверены</label>
+    <button id="commission-valve-save">Сохранить калибровку крана в профиль</button>
+  </fieldset>
+  <fieldset><legend>Калибровка насоса по измеренной жидкости</legend>
+    <label>Насос <select id="commission-pump"></select></label>
+    <label>Знак выдавливания <select id="commission-dispense"><option value="1">+1</option><option value="-1">−1</option></select></label>
+    <p>Минимум три измерения. В каждой строке step_pulses и либо volume_ul, либо mass_g с density_g_ml.
+      Пример одной строки: {"step_pulses": 800, "volume_ul": 125}. Это пример, не результат прибора.</p>
+    <textarea id="commission-measurements" class="json-editor" spellcheck="false">[]</textarea>
+    <label>Условия: направление, скорость, жидкость, шприц/трубка, нагрузка <input id="commission-pump-notes"></label>
+    <label><input id="commission-pump-confirm" type="checkbox">Это мои реальные измерения</label>
+    <button id="commission-pump-save">Рассчитать и сохранить измерения и коэффициент</button>
+  </fieldset>
+  <fieldset><legend>Датчик оборота насоса промывки</legend>
+    <p>Только после определения входа и проверки сигнала вручную. Измерение проходит между двумя нажатиями в одном направлении.
+      При отсутствии датчика запишите это в журнале и согласуйте замену проверки с разработчиком прибора.</p>
+    <label>Канал M119 <input id="commission-period-channel" placeholder="фактически проверенный канал"></label>
+    <label>Направление <select id="commission-period-direction"><option value="1">+1</option><option value="-1">−1</option></select></label>
+    <label>Шаг опроса, ед. <input id="commission-period-step" type="number" value="0.5" step="any"></label>
+    <label>Максимальный суммарный ход, ед. <input id="commission-period-distance" type="number" step="any"></label>
+    <label>Наблюдения <input id="commission-period-notes"></label>
+    <button id="commission-period">Измерить период U и сохранить результат</button>
+  </fieldset>
+  <fieldset><legend>Журнал проверок</legend>
+    <label>Проверка <select id="commission-check"></select></label>
+    <label>Результат <select id="commission-passed"><option value="false">Не пройдена</option><option value="true">Пройдена</option></select></label>
+    <label>Устройство / процедура <input id="commission-device" value="instrument"></label>
+    <label>Что проверили и что получили <input id="commission-notes"></label>
+    <button id="commission-record">Записать результат в профиль</button>
+    <button id="commission-readiness">Проверить готовность</button>
+    <div id="commission-checklist"></div>
+  </fieldset>
+  <fieldset><legend>Передача на другой компьютер</legend>
+    <button id="commission-export">Скачать профиль, журнал и процедуры</button>
+    <label>Импорт комплекта JSON <input id="commission-import-file" type="file" accept=".json"></label>
+    <button id="commission-import">Импортировать комплект</button>
+    <p>Импорт заменяет одноимённые локальные файлы. Сначала скачайте резервный комплект.
+      Активация и движение при импорте не выполняются.</p>
+  </fieldset>
+  <pre id="commission-result" aria-live="polite"></pre>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="/static/js/panels/commissioning.js?v=2"></script>{% endblock %}

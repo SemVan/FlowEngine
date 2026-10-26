@@ -19,6 +19,8 @@ NumberValue = float | ParameterReference
 class _Step(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
+    title: str | None = None
+
     @model_validator(mode="after")
     def check_numeric_fields(self):
         for name in (
@@ -162,7 +164,14 @@ class SetParamStep(_Step):
 class SetValveStep(_Step):
     op: Literal["set_valve"]
     name: str
-    position: Literal["A", "B"]
+    position: str = Field(min_length=1)
+    feedrate: NumberValue | None = None
+    acceleration: NumberValue | None = None
+
+
+class RequireReferenceStep(_Step):
+    op: Literal["require_reference"]
+    axes: list[str] = Field(min_length=1)
 
 
 class HomeValveStep(_Step):
@@ -191,12 +200,32 @@ class CheckpointStep(_Step):
     name: str
 
 
+class RequireSetupStep(_Step):
+    op: Literal["require_setup"]
+    message: str = Field(min_length=1)
+
+
 class CallStep(_Step):
     """Invoke another named procedure with an explicit parameter mapping."""
 
     op: Literal["call"]
     procedure: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
     parameters: dict[str, float | int | str | bool] = Field(default_factory=dict)
+
+
+class RepeatStep(_Step):
+    """Repeat a reusable named procedure a bounded number of times."""
+
+    op: Literal["repeat"]
+    procedure: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+    times: int | ParameterReference
+    parameters: dict[str, float | int | str | bool] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def bounded_times(self):
+        if isinstance(self.times, int) and not 1 <= self.times <= 1000:
+            raise ValueError("repeat times must be between 1 and 1000")
+        return self
 
 
 class ProcedureParameter(BaseModel):
@@ -231,6 +260,7 @@ Step = Annotated[
     MoveStep
     | MoveMultiStep
     | HomeStep
+    | RequireReferenceStep
     | DwellStep
     | SetParamStep
     | SetValveStep
@@ -245,7 +275,9 @@ Step = Annotated[
     | SeekStep
     | ValveCalibrationStep
     | ReferenceTestStep
-    | CallStep,
+    | CallStep
+    | RepeatStep
+    | RequireSetupStep,
     Field(discriminator="op"),
 ]
 
@@ -254,6 +286,7 @@ class Procedure(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
     name: str = Field(min_length=1)
+    title: str = ""
     description: str = ""
     version: int = 1
     draft: bool = False

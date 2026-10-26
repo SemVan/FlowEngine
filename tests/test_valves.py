@@ -102,6 +102,54 @@ async def test_go_requires_reference_and_keeps_calibration():
     assert value["config"]["position_b"] == -2
 
 
+@pytest.mark.parametrize("speed, expected", [(None, 120), (90, 90), (900, 300)])
+async def test_valve_step_speed_uses_default_or_existing_cap(speed, expected):
+    sender, transport = await stack()
+    await sender.home_valve("sample")
+    transport.commands.clear()
+    await sender.set_valve("sample", "B", speed)
+    moves = [c for c in transport.commands if c.startswith("G1 ")]
+    assert moves == [f"G1 C-2.000000 F{expected:.3f}"]
+    assert sender.valves.states["sample_valve"].current == "B"
+    assert not any(c.startswith(("M906", "M17")) for c in transport.commands)
+
+
+async def test_valve_procedure_parameters_apply_and_restore_acceleration():
+    from flowengine.events import EventBus
+    from flowengine.procedures.runner import ProcedureRunner
+    from flowengine.schemas import Procedure
+    from flowengine.state import State, StateMachine
+
+    sender, transport = await stack()
+    await sender.home_valve("sample")
+    transport.commands.clear()
+    state = StateMachine()
+    await state.transition(State.CONNECTED_IDLE)
+    runner = ProcedureRunner(sender, sender._map, state, EventBus())
+    proc = Procedure.model_validate({
+        "name": "valve_speed",
+        "parameters": {"speed": {"type": "number", "default": 80}},
+        "steps": [{"op": "set_valve", "name": "sample_valve", "position": "B",
+                   "feedrate": "${speed}", "acceleration": 50}],
+    }).resolve()
+    await runner.run(proc)
+    assert runner.status["error"] is None
+    commands = transport.commands
+    accel = commands.index("M204 P50.000 T50.000")
+    move = commands.index("G1 C-2.000000 F80.000")
+    restore = next(i for i, c in enumerate(commands) if c.startswith("M204 P3000"))
+    assert accel < move < restore
+    assert transport._acceleration["P"] == 3000
+
+
+@pytest.mark.parametrize("speed", [0, -1, float("nan"), float("inf")])
+async def test_invalid_valve_speed_is_refused_before_commands(speed):
+    sender, transport = await stack()
+    with pytest.raises(ValueError, match="feedrate"):
+        await sender.set_valve("sample", "B", speed)
+    assert not transport.commands
+
+
 async def test_unexpected_endstop_stops_and_faults_without_next_move():
     sender, transport = await stack()
     await sender.home_valve("sample")
@@ -562,6 +610,10 @@ def test_commissioning_persists_home_relative_positions_and_reconnect(tmp_path, 
 def test_api_requires_explicit_m119_channel_and_blocks_unknown_source(tmp_path, monkeypatch):
     monkeypatch.setenv("FLOWENGINE_CONFIG_DIR", str(tmp_path))
     with TestClient(create_app(AppSettings(mock=True, log_level="WARNING"))) as client:
+        from flowengine.api.router_axis_calibration import _apply_runtime_device_map
+        ctx = client.app.state.ctx
+        _apply_runtime_device_map(ctx, ctx.device_map.model_copy(update={
+            "shared_valve_endstop": SharedValveEndstop(channel=None)}))
         assert client.post("/api/valves/home-all").status_code == 409
         inputs = client.get("/api/valves/inputs").json()
         assert "z_min" in inputs["z_candidates"]

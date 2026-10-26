@@ -1,0 +1,13 @@
+name: test_start
+title: Проверка запуска
+description: Пример последовательных шагов без движения.
+version: 1
+draft: false
+parameters: {}
+steps:
+- op: log
+  message: начало
+- op: dwell
+  seconds: 2.0
+- op: log
+  message: готово

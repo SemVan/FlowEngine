@@ -1,0 +1,21 @@
+name: startup
+description: HOME использует сохранённые направления и параметры personal. Рабочие
+  положения и маршруты требуют проверки.
+version: 1
+draft: true
+steps:
+- op: call
+  procedure: home_valves_shared
+- op: set_valve
+  name: wash_valve
+  position: КП-ПРОКАЧКА
+- op: set_valve
+  name: sheath_valve
+  position: КО-ПРОКАЧКА
+- op: set_valve
+  name: sample_valve
+  position: КС-ПРОКАЧКА
+- op: call
+  procedure: reference_pumps
+- op: checkpoint
+  name: startup positions established; pump references verified

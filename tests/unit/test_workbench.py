@@ -229,14 +229,18 @@ async def test_pump_multi_ratios_and_incompatible_durations():
     assert motion.positions == {"X": 1, "Y": 2}
     assert len([c for c in transport.commands if c.startswith("G1 ")]) == 1
     before = len(transport.commands)
-    with pytest.raises(ValueError, match="different finish times"):
-        await sender.pump_multi(
-            {
-                "pump": PumpDose(volume_ul=25, flow_ul_min=25),
-                "sheath": PumpDose(volume_ul=100, flow_ul_min=200),
-            }
-        )
-    assert len(transport.commands) == before
+    report = await sender.pump_multi(
+        {
+            "pump": PumpDose(volume_ul=25, flow_ul_min=25),
+            "sheath": PumpDose(volume_ul=100, flow_ul_min=200),
+        }
+    )
+    await sender.wait_idle()
+    assert len(report["segments"]) == 2
+    assert motion.positions == {"X": 2, "Y": 4}
+    moves = [c for c in transport.commands[before:] if c.startswith("G1 ")]
+    assert len(moves) == 2
+    assert "Y" in moves[0] and "Y" not in moves[1]
 
 
 async def test_faulted_queue_does_not_consume_late_ack():
@@ -250,3 +254,14 @@ async def test_faulted_queue_does_not_consume_late_ack():
     with pytest.raises(ControllerError, match="aborted"):
         await queue.send("G1 X1")
     assert len(transport.commands) == count
+
+
+async def test_multi_pump_checks_entire_move_before_first_segment():
+    device = dm().model_copy(update={"pumps": [dm().pumps[0], PumpConfig(
+        name="sheath", axis="Y", kind="syringe", calibrated=True, volume_per_unit_ul=50)]})
+    sender, motion, transport = await stack(device)
+    motion.mark_homed(["X", "Y"])
+    with pytest.raises(ValueError, match="speed limit"):
+        await sender.pump_multi({"pump": PumpDose(volume_ul=25, flow_ul_min=25),
+                                 "sheath": PumpDose(volume_ul=100, flow_ul_min=100000)})
+    assert not any(c.startswith("G1 ") for c in transport.commands)

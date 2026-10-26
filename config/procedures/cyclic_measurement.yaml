@@ -1,0 +1,22 @@
+name: cyclic_measurement
+description: "DRAFT top-level procedure from the supplied table: initial wash, then repeat intake-analysis-wash N times."
+version: 1
+draft: true
+parameters:
+  cycles: {type: integer, default: 1, minimum: 1, maximum: 1000}
+  sample_volume_ul: {type: number, default: 100.0, minimum: 0.1}
+  sample_flow_ul_min: {type: number, default: 100.0, minimum: 0.1}
+  sheath_volume_ul: {type: number, default: 500.0, minimum: 0.1}
+  sheath_flow_ul_min: {type: number, default: 500.0, minimum: 0.1}
+  wash_volume_ul: {type: number, default: 100.0, minimum: 0.1}
+  wash_flow_ul_min: {type: number, default: 100.0, minimum: 0.1}
+  acceleration: {type: number, default: 50.0, minimum: 0.1}
+steps:
+  - op: call
+    procedure: wash
+    parameters: {cuvette_volume_ul: "${wash_volume_ul}", cuvette_flow_ul_min: "${wash_flow_ul_min}", sampler_volume_ul: "${wash_volume_ul}", sampler_flow_ul_min: "${wash_flow_ul_min}", acceleration: "${acceleration}"}
+  - op: repeat
+    procedure: measurement_iteration
+    times: "${cycles}"
+    parameters: {sample_volume_ul: "${sample_volume_ul}", sample_flow_ul_min: "${sample_flow_ul_min}", sheath_volume_ul: "${sheath_volume_ul}", sheath_flow_ul_min: "${sheath_flow_ul_min}", wash_volume_ul: "${wash_volume_ul}", wash_flow_ul_min: "${wash_flow_ul_min}", acceleration: "${acceleration}"}
+  - {op: checkpoint, name: "cyclic measurement complete"}

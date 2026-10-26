@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
-from starlette.responses import HTMLResponse
+from starlette.responses import HTMLResponse, PlainTextResponse
 
 from flowengine.api import (
     config_router,
@@ -35,6 +35,8 @@ from flowengine.api import (
 )
 from flowengine.api.deps import AppContext
 from flowengine.api.router_workbench import router as workbench_router
+from flowengine.api.router_commissioning import router as commissioning_router
+from flowengine.api.router_commissioning_results import router as commissioning_results_router
 from flowengine.api.router_valves import router as valves_router
 from flowengine.api.router_axis_calibration import router as axis_calibration_router, shutdown as shutdown_axis_calibration
 from flowengine.config import WEB_DIR, AppSettings, user_overlay_dir
@@ -171,6 +173,17 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             runner=runner,
             profile_name=settings.profile,
         )
+        def persist_procedure(status):
+            from flowengine.commissioning import record
+            ctx = app.state.ctx
+            if ctx.profile_name == "default":
+                return
+            profile = load_yaml(find_saved("profiles", ctx.profile_name), ConfigurationProfile)
+            record(profile, "procedure_run", str(status["name"]),
+                   "Результат процедуры; физические наблюдения записываются отдельно",
+                   {"status": status, "serial_trace": list(ctx.queue.trace)},
+                   passed=status["error"] is None)
+        runner.recorder = persist_procedure
         app.state.reconnect_lock = asyncio.Lock()
         forwarder = asyncio.create_task(_forward_state_to_ws(state, events, app.state.ctx))
 
@@ -197,6 +210,8 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     app.include_router(stepskip_router)
     app.include_router(ws_router)
     app.include_router(workbench_router)
+    app.include_router(commissioning_router)
+    app.include_router(commissioning_results_router)
     app.include_router(axis_calibration_router)
     app.include_router(valves_router)
 
@@ -259,6 +274,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                 ctx.queue = new_queue
                 ctx.motion = new_motion
                 ctx.sender = new_sender
+                new_runner.recorder = ctx.runner.recorder
                 ctx.runner = new_runner
                 ctx.profile_name = selection.name
                 app.state.profile_name = selection.name
@@ -341,6 +357,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                 ctx.queue = new_queue
                 ctx.motion = new_motion
                 ctx.sender = new_sender
+                new_runner.recorder = ctx.runner.recorder
                 ctx.runner = new_runner
                 detail = (
                     "reconnected; references lost; motion enabled"
@@ -405,6 +422,22 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         return templates.TemplateResponse(
             request=request, name="procedures.html", context={"title": "Procedures"}
         )
+
+    @app.get("/commissioning", response_class=HTMLResponse)
+    async def commissioning_page(request: Request):
+        return templates.TemplateResponse(
+            request=request, name="commissioning.html", context={"title": "Наладка прибора"}
+        )
+
+    @app.get("/commissioning/results", response_class=HTMLResponse)
+    async def commissioning_results_page(request: Request):
+        return templates.TemplateResponse(
+            request=request, name="commissioning_results.html", context={"title": "Результаты наладки"}
+        )
+
+    @app.get("/commissioning/guide", response_class=PlainTextResponse)
+    async def commissioning_guide():
+        return (WEB_DIR.parent / "docs" / "PERSONAL_COMMISSIONING.md").read_text(encoding="utf-8")
 
     @app.get("/config", response_class=HTMLResponse)
     async def config_page(request: Request):

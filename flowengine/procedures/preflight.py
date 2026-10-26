@@ -12,6 +12,8 @@ from flowengine.schemas.procedure import (
     PumpMultiStep,
     PumpStep,
     ReferenceTestStep,
+    RequireSetupStep,
+    RequireReferenceStep,
     SeekStep,
     SetParamStep,
     SetValveStep,
@@ -25,7 +27,9 @@ def execution_issues(procedure: Procedure, device: DeviceMap, runtime: RuntimePa
     known = {a.marlin_axis for a in device.axes}
     for index, step in enumerate(procedure.steps, 1):
         prefix = f"step {index}: "
-        if isinstance(step, (SetParamStep, WaitPressureStep)):
+        if isinstance(step, RequireSetupStep):
+            issues.append(prefix + step.message)
+        elif isinstance(step, (SetParamStep, WaitPressureStep)):
             issues.append(prefix + f"{step.op} is not implemented")
         elif isinstance(step, (HomeValveStep, SetValveStep)):
             valve = next((v for v in device.valves if v.name == step.name), None)
@@ -33,6 +37,11 @@ def execution_issues(procedure: Procedure, device: DeviceMap, runtime: RuntimePa
                 issues.append(prefix + "shared_valve_endstop channel is not configured")
             if isinstance(step, SetValveStep) and valve and not valve.calibrated:
                 issues.append(prefix + "valve A/B commissioning required")
+            if isinstance(step, HomeValveStep) and valve and valve.direction_toward_home is None:
+                issues.append(prefix + "valve HOME direction is not configured in the profile")
+        elif isinstance(step, RequireReferenceStep):
+            if not set(step.axes) <= known:
+                issues.append(prefix + "unknown reference axis")
         elif isinstance(step, PumpStep):
             pump = next((p for p in device.pumps if p.name == step.name), None)
             if pump is None or not pump.calibrated:
@@ -56,12 +65,24 @@ def execution_issues(procedure: Procedure, device: DeviceMap, runtime: RuntimePa
                     prefix + "firmware-stopped probe search is not bench-verified for axis/channel"
                 )
         elif isinstance(step, HomeStep):
-            axes = step.axes if step.axes is not None else list(known)
+            axes = step.axes if step.axes is not None else [a.marlin_axis for a in device.axes if a.kind != "peristaltic_pump"]
             for axis in axes:
                 if any(v.axis == axis for v in device.valves):
                     if not device.shared_valve_endstop.channel:
                         issues.append(prefix + "shared_valve_endstop channel is not configured")
+                    valve = next(v for v in device.valves if v.axis == axis)
+                    if valve.direction_toward_home is None:
+                        issues.append(prefix + "valve HOME direction is not configured in the profile")
                     continue
+                if axis in known:
+                    cfg = device.axis(axis)
+                    if axis in {"X", "Y"} and cfg.kind == "syringe_pump" and cfg.endstop_channels_shared:
+                        if cfg.axis_calibration is None:
+                            issues.append(prefix + f"{axis}: калибровка двух концевиков не сохранена; G28 запрещён")
+                        continue
+                    if cfg.kind == "peristaltic_pump":
+                        issues.append(prefix + f"{axis}: подтвердите исходную координату вращающегося насоса в Наладке")
+                        continue
                 if any(
                     axis in group.axes and len(group.axes) > 1 for group in device.endstop_inputs
                 ):

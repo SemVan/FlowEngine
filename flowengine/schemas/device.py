@@ -169,6 +169,8 @@ class ValveConfig(BaseModel):
     position_a: float
     position_b: float
     home_position: Literal["A", "B"] = "A"
+    position_names: dict[str, Literal["A", "B"]] = Field(default_factory=dict)
+    calibration_notes: str = ""
     direction_toward_home: Literal[-1, 1] | None = None
     home_seek_speed: float = Field(default=120.0, gt=0)
     home_latch_speed: float = Field(default=30.0, gt=0)
@@ -176,6 +178,15 @@ class ValveConfig(BaseModel):
     pull_off: float = Field(default=0.5, gt=0)
     home_timeout_s: float = Field(default=30.0, gt=0, le=120)
     calibrated: bool = False
+
+    def position_slot(self, name: str) -> Literal["A", "B"]:
+        slot = name.upper() if name.upper() in {"A", "B"} else self.position_names.get(name)
+        if slot not in {"A", "B"}:
+            raise ValueError(f"unknown position {name!r} for valve {self.name!r}")
+        return slot
+
+    def position(self, name: str) -> float:
+        return self.position_a if self.position_slot(name) == "A" else self.position_b
 
 
 class SharedValveEndstop(BaseModel):
@@ -204,6 +215,7 @@ class PumpConfig(BaseModel):
     dispense_direction: Literal[-1, 1] = 1
     calibrated: bool = False
     calibration_notes: str = ""
+    allowed_routes: dict[Literal["aspirate", "dispense"], dict[str, list[str]]] = Field(default_factory=dict)
 
 
 class EndstopInput(BaseModel):
@@ -289,6 +301,13 @@ class DeviceMap(BaseModel):
         for p in self.pumps:
             if p.axis not in axis_set:
                 raise ValueError(f"pump {p.name!r} references unknown axis {p.axis}")
+            for route in p.allowed_routes.values():
+                for name, positions in route.items():
+                    valve = next((v for v in self.valves if v.name == name), None)
+                    if valve is None or not positions:
+                        raise ValueError(f"pump {p.name}: route must name known valves and positions")
+                    for position in positions:
+                        valve.position(position)
         if self.autosampler is not None:
             for slot in (
                 self.autosampler.x_axis,
