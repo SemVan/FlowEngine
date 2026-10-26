@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -84,7 +85,7 @@ async def seek_switch(
     direction: int,
     feedrate: float,
     target_pressed: bool,
-    timeout_s: float,
+    timeout_s: float | None,
     steps_per_unit: float | None = None,
     diagnostics_timeout: float,
     move_timeout: float,
@@ -94,7 +95,7 @@ async def seek_switch(
 ) -> SeekOutcome:
     if direction not in {-1, 1}:
         raise ValueError("direction must be -1 or +1")
-    if feedrate <= 0 or timeout_s <= 0:
+    if not math.isfinite(feedrate) or feedrate <= 0 or (timeout_s is not None and (not math.isfinite(timeout_s) or timeout_s <= 0)):
         raise ValueError("feedrate and timeout must be positive")
 
     loop = asyncio.get_running_loop()
@@ -113,7 +114,7 @@ async def seek_switch(
             reason = stop_reason() if stop_reason else None
             if reason:
                 return SeekOutcome(False, reason, loop.time() - started, polls)
-            if loop.time() - started >= timeout_s:
+            if timeout_s is not None and loop.time() - started >= timeout_s:
                 return SeekOutcome(False, "watchdog_timeout", loop.time() - started, polls)
             current = await queue.send("M114", timeout=diagnostics_timeout)
             if axis not in (current.position or {}):
@@ -127,8 +128,9 @@ async def seek_switch(
             if pressed == target_pressed:
                 return SeekOutcome(True, None, loop.time() - started, polls)
 
-    # длину G1 берём из скорости и тайм-аута; это не граница механизма
-    watchdog_distance = feedrate * timeout_s / 60.0 * 1.05
+    # без таймера продлеваем ход заранее; M119 и STOP продолжают работать
+    watchdog_distance = feedrate if timeout_s is None else feedrate * timeout_s / 60.0 * 1.05
+    next_segment_at = started + 50.0
     await queue.send("G91", timeout=diagnostics_timeout)
     try:
         await queue.send(
@@ -148,7 +150,7 @@ async def seek_switch(
                 return SeekOutcome(False, reason, loop.time() - started, polls)
 
             elapsed = loop.time() - started
-            if elapsed >= timeout_s:
+            if timeout_s is not None and elapsed >= timeout_s:
                 await _normal_quickstop(
                     queue,
                     axis=axis,
@@ -157,6 +159,10 @@ async def seek_switch(
                     move_timeout=move_timeout,
                 )
                 return SeekOutcome(False, "watchdog_timeout", elapsed, polls)
+
+            if timeout_s is None and loop.time() >= next_segment_at:
+                await queue.send(f"G1 {axis}{direction * watchdog_distance:.4f} F{feedrate:.2f}", timeout=move_timeout)
+                next_segment_at += 60.0
 
             pressed = await _switch_state(queue, channel, diagnostics_timeout)
             polls += 1

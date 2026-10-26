@@ -10,8 +10,8 @@ const releaseLabel = status => ({PENDING:'выполняется',
   REQUESTED_UNCONFIRMED:'снятие удержания запрошено, подтверждения нет',
   UNKNOWN:'снятие удержания не подтверждено, состояние питания неизвестно'}[status] || '');
 
-async function request(path, method = 'GET', body) {
-  const response = await fetch(`/api/valves${path}`, {method,
+async function request(path, method = 'GET', body, prefix = '/api/valves') {
+  const response = await fetch(`${prefix}${path}`, {method,
     headers: {'Content-Type':'application/json'}, body: body ? JSON.stringify(body) : undefined});
   const result = await response.json();
   if (!response.ok) throw new Error(Array.isArray(result.detail)
@@ -42,9 +42,11 @@ function render(data) {
       <button data-name="${escape(v.name)}" data-action="go_a" ${locked || !open || !v.calibrated || !v.referenced ? 'disabled' : ''}>Go A</button>
       <button data-name="${escape(v.name)}" data-action="go_b" ${locked || !open || !v.calibrated || !v.referenced ? 'disabled' : ''}>Go B</button>
       <button data-name="${escape(v.name)}" data-action="calibrate" ${locked || !open ? 'disabled' : ''}>Calibrate · ${escape(valveLabel(v))}</button>
-      ${v.commissioning ? `<p>1. Установите A шагами от HOME и сохраните. 2. Продолжите к B и сохраните.
-        При необходимости вернуться ближе к HOME начните Calibrate заново; порядок A/B может быть любым.</p>
+      ${v.commissioning ? `<p>Выберите рабочее положение на глаз и сохраните A, затем B. Для грубой подстройки есть шаги 1 и 10, для точной — 0.1.</p>
         <button data-name="${escape(v.name)}" data-action="jog" data-delta="${v.direction_away_from_home * 0.1}" ${locked || !open ? 'disabled' : ''}>От HOME · 0.1</button>
+        <button data-name="${escape(v.name)}" data-action="position_jog" data-delta="${v.direction_away_from_home}" ${locked || !open ? 'disabled' : ''}>От HOME · 1</button>
+        <button data-name="${escape(v.name)}" data-action="position_jog" data-delta="${v.direction_away_from_home * 10}" ${locked || !open ? 'disabled' : ''}>От HOME · 10</button>
+        <button data-name="${escape(v.name)}" data-action="position_jog" data-delta="${v.direction_toward_home}" ${locked || !open ? 'disabled' : ''}>Обратно · 1</button>
         <button data-name="${escape(v.name)}" data-action="save_a" ${locked || !open ? 'disabled' : ''}>Сохранить A ${v.saved_a ? '✓' : ''}</button>
         <button data-name="${escape(v.name)}" data-action="save_b" ${locked || !open ? 'disabled' : ''}>Сохранить B ${v.saved_b ? '✓' : ''}</button>` : ''}
     </article>`).join('');
@@ -60,7 +62,7 @@ function render(data) {
     el('valve-service-name').innerHTML = '<option value="">Выберите кран для движения</option>' + data.valves.map(v => `<option value="${escape(v.name)}">${escape(valveLabel(v))} (${escape(v.name)})</option>`).join('');
     el('valve-settings').innerHTML = data.valves.map((v, i) => `<fieldset><legend>${escape(v.name)} · ${escape(v.axis)}</legend>
       <label>Направление к HOME <select data-setting="direction_toward_home" data-index="${i}"><option value="1" ${v.direction_toward_home === 1 ? 'selected' : ''}>+</option><option value="-1" ${v.direction_toward_home === -1 ? 'selected' : ''}>−</option></select></label>
-      ${[['home_seek_speed','Fast seek, ед/мин'],['home_latch_speed','Slow latch, ед/мин'],['backoff','Backoff, ед'],['pull_off','Pull-off, ед'],['home_timeout_s','Watchdog, сек']].map(([key,label]) => `<label>${label} <input type="number" min="0.001" step="any" data-setting="${key}" data-index="${i}" value="${v.config[key]}"></label>`).join('')}</fieldset>`).join('');
+      ${[['home_seek_speed','Подход к микрику, ед/мин'],['home_latch_speed','Точное касание, ед/мин'],['backoff','Backoff, ед'],['pull_off','Pull-off, ед'],['home_timeout_s','Поиск, сек (пусто — до микрика)']].map(([key,label]) => `<label>${label} <input type="number" min="0.001" step="any" data-setting="${key}" data-index="${i}" value="${v.config[key] ?? ''}"></label>`).join('')}</fieldset>`).join('');
     if (shared.channel) el('valve-channel').innerHTML = `<option value="${escape(shared.channel)}">${escape(shared.channel)}</option>`;
   }
 }
@@ -84,6 +86,12 @@ async function submit(operation) {
 el('valve-cards').addEventListener('click', event => {
   const button = event.target.closest('[data-action]');
   if (!button || button.disabled) return;
+  if (button.dataset.action === 'position_jog') {
+    const valve = snapshot.valves.find(v => v.name === button.dataset.name);
+    submit(() => request('/jog', 'POST', {axis:valve.axis,
+      by:Number(button.dataset.delta), feedrate:valve.config.home_seek_speed}, '/api/commissioning'));
+    return;
+  }
   submit(() => request(`/${encodeURIComponent(button.dataset.name)}`, 'POST',
     {action:button.dataset.action, delta:Number(button.dataset.delta || 0.1)}));
 });
@@ -116,7 +124,7 @@ el('valve-inputs').onclick = async () => {
 };
 el('valve-save-config').onclick = () => submit(async () => {
   const valves = snapshot.valves.map(v => ({...v.config}));
-  document.querySelectorAll('[data-setting]').forEach(input => { valves[Number(input.dataset.index)][input.dataset.setting] = Number(input.value); });
+  document.querySelectorAll('[data-setting]').forEach(input => { valves[Number(input.dataset.index)][input.dataset.setting] = input.dataset.setting === "home_timeout_s" && input.value.trim() === "" ? null : Number(input.value); });
   await request('/config', 'PUT', {shared_valve_endstop:{channel:el('valve-channel').value || null}, valves});
   message('Сохранено. Выполните Home и сохраните A/B для одного крана.');
 });

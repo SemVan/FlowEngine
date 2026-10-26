@@ -142,13 +142,12 @@ class ValveSubsystem:
                 st.state, st.current, st.error = "FAULT", "UNKNOWN", str(exc)
                 st.commissioning = False
                 self.sender._motion.invalidate([cfg.axis])
-                if not release_after:
-                    try:
-                        await self.quickstop(cfg)
-                        if soft_state is not None:
-                            await self.sender._q.send(f"M211 S{soft_state}", timeout=self.sender._timeouts.diagnostics)
-                    except Exception:
-                        pass
+                try:
+                    await self.quickstop(cfg)
+                    if soft_state is not None:
+                        await self.sender._q.send(f"M211 S{soft_state}", timeout=self.sender._timeouts.diagnostics)
+                except Exception:
+                    pass
                 await self.sender.abort()
                 raise
             finally:
@@ -173,7 +172,8 @@ class ValveSubsystem:
 
         outcome = await seek_switch(self.sender._q, axis=cfg.axis,
             channel=self.sender._map.shared_valve_endstop.channel, direction=direction,
-            feedrate=speed, target_pressed=pressed, timeout_s=cfg.home_timeout_s,
+            feedrate=speed, target_pressed=pressed,
+            timeout_s=cfg.home_timeout_s,
             steps_per_unit=self.sender._map.axis(cfg.axis).steps_per_unit,
             diagnostics_timeout=self.sender._timeouts.diagnostics,
             move_timeout=self.sender._timeouts.move, on_poll=poll,
@@ -233,14 +233,14 @@ class ValveSubsystem:
         seek_speed = min(cfg.home_seek_speed, self.sender._motion.max_feedrate(cfg.axis))
         latch_speed = min(cfg.home_latch_speed, seek_speed)
         await self.seek(cfg, toward, True, seek_speed, "fast seek")
-        await self.seek(cfg, -toward, False, latch_speed, "release")
+        await self.seek(cfg, -toward, False, seek_speed, "release")
         await self.finite_move(cfg, await self.position(cfg) - toward * cfg.backoff, latch_speed)
         await self.seek(cfg, toward, True, latch_speed, "slow latch")
         await self.position(cfg)
         home_count = self.sender._counts.get(cfg.axis)
         await self.sender._q.send(f"G92 {cfg.axis}0", timeout=self.sender._timeouts.diagnostics)
         self.phase = "pull-off release"
-        await self.seek(cfg, -toward, False, latch_speed, "pull-off release")
+        await self.seek(cfg, -toward, False, seek_speed, "pull-off release")
         # после M410 возвращаем координату относительно HOME крана
         await self.position(cfg)
         if home_count is not None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 
 from fastapi.testclient import TestClient
 import pytest
@@ -123,3 +124,28 @@ def test_commissioning_apply_keeps_personal_calibration_without_gcode(tmp_path, 
             "axis": "Y", "position": 0, "notes": "not a replacement for HOME", "confirmed": True})
         assert response.status_code == 400
         assert ctx.transport.commands == before
+
+
+def test_visual_positioning_keeps_home_and_saves_both_valve_positions(tmp_path, monkeypatch):
+    monkeypatch.setenv("FLOWENGINE_CONFIG_DIR", str(tmp_path))
+    with TestClient(create_app(AppSettings(mock=True, log_level="WARNING"))) as client:
+        assert client.post("/api/valves/sample", json={"action": "calibrate"}).status_code == 200
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            status = client.get("/api/valves").json()
+            if status["job"]["state"] != "running":
+                break
+            time.sleep(.01)
+        assert status["job"]["state"] == "completed", status
+        saved = []
+        for slot in ["a", "b"]:
+            response = client.post("/api/commissioning/jog", json={"axis": "C", "by": 10, "feedrate": 600})
+            assert response.status_code == 200, response.text
+            assert client.get("/api/state").json()["homed"]["C"]
+            response = client.post("/api/valves/sample", json={"action": "save_" + slot})
+            assert response.status_code == 200, response.text
+            saved.append(response.json()["coordinate"])
+        assert saved[1] - saved[0] == pytest.approx(10)
+        valve = client.get("/api/valves").json()["valves"][2]
+        assert valve["calibrated"] and valve["referenced"]
+        assert [valve["config"]["position_a"], valve["config"]["position_b"]] == saved

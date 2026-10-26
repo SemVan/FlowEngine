@@ -176,7 +176,8 @@ class ValveConfig(BaseModel):
     home_latch_speed: float = Field(default=30.0, gt=0)
     backoff: float = Field(default=0.5, gt=0)
     pull_off: float = Field(default=0.5, gt=0)
-    home_timeout_s: float = Field(default=30.0, gt=0, le=120)
+    home_timeout_s: float | None = Field(default=30.0, gt=0, le=120,
+                                        description="None: search phases wait for the switch change or STOP")
     calibrated: bool = False
 
     def position_slot(self, name: str) -> Literal["A", "B"]:

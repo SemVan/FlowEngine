@@ -74,8 +74,8 @@ valves:
 - name: wash_valve
   axis: A
   direction_toward_home: -1
-  home_seek_speed: 120.0
-  home_latch_speed: 30.0
+  home_seek_speed: 600.0
+  home_latch_speed: 120.0
   backoff: 0.5
   pull_off: 0.5
   calibrated: false
@@ -87,12 +87,12 @@ valves:
   position_names:
     КП-ПРОКАЧКА: A
     КП-ПРОМЫВКА: B
-  home_timeout_s: 30.0
+  home_timeout_s: null
 - name: sheath_valve
   axis: B
   direction_toward_home: -1
-  home_seek_speed: 120.0
-  home_latch_speed: 30.0
+  home_seek_speed: 600.0
+  home_latch_speed: 120.0
   backoff: 0.5
   pull_off: 0.5
   calibrated: false
@@ -104,12 +104,12 @@ valves:
   position_names:
     КО-ПРОКАЧКА: A
     КО-ЗАБОР: B
-  home_timeout_s: 30.0
+  home_timeout_s: null
 - name: sample_valve
   axis: C
   direction_toward_home: -1
-  home_seek_speed: 120.0
-  home_latch_speed: 30.0
+  home_seek_speed: 600.0
+  home_latch_speed: 120.0
   backoff: 0.5
   pull_off: 0.5
   calibrated: false
@@ -121,7 +121,7 @@ valves:
   position_names:
     КС-ПРОКАЧКА: A
     КС-ЗАБОР: B
-  home_timeout_s: 30.0
+  home_timeout_s: null
 endstop_inputs:
 - channel: z_min
   axes:
