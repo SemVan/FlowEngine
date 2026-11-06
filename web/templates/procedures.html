@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
+{% include "partials/instrument_home.html" %}
 {% include "partials/procedure_builder.html" %}
 {% endblock %}
 {% block scripts %}
-<script type="module" src="/static/js/panels/procedures.js"></script>
+<script type="module" src="/static/js/instrument-home.js?v=2"></script>
+<script type="module" src="/static/js/panels/procedures.js?v=6"></script>
 {% endblock %}

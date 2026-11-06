@@ -18,6 +18,7 @@ import logging
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from flowengine.errors import (
     ControllerError,
@@ -67,11 +68,18 @@ class CommandQueue:
         self._release_lock = asyncio.Lock()
         self._abort_releases: dict[str, bool] = {}
         self._depth = 0
-        self.trace: deque[dict[str, str]] = deque(maxlen=1000)
+        self.trace: deque[dict[str, str | int]] = deque(maxlen=1000)
+        self.trace_id = uuid4().hex
+        self.trace_sequence = 0
+        self.before_command = None
 
     def _record(self, direction: str, line: str) -> None:
+        if direction == "TX" and self.before_command:
+            self.before_command(line)
+        self.trace_sequence += 1
         self.trace.append(
-            {"timestamp": datetime.now(UTC).isoformat(), "direction": direction, "line": line}
+            {"timestamp": datetime.now(UTC).isoformat(), "direction": direction, "line": line,
+             "sequence": self.trace_sequence}
         )
 
     @property
@@ -146,6 +154,12 @@ class CommandQueue:
     def reset_abort(self) -> None:
         """Operator acknowledged the abort; the queue is usable again."""
         self._aborted.clear()
+
+    async def request_stepper_timeout(self, seconds: int) -> None:
+        if not self._aborted.is_set() or not 1 <= seconds <= 3600:
+            raise ControllerError("stepper timeout recovery requires an aborted queue")
+        self._record("TX", f"M84 S{seconds} (out-of-band timeout request; unconfirmed)")
+        await self._transport.send_line(f"M84 S{seconds}")
 
     async def _read_or_abort(self, timeout: float) -> str:
         """прерываем ожидание по Stop; для дальнейшей работы нужна новая связь"""

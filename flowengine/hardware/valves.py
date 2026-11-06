@@ -11,6 +11,10 @@ from flowengine.errors import ControllerError, StateError
 from flowengine.hardware.endstop_seek import _normal_quickstop, seek_switch
 
 
+class _ValveHomeCancelled(StateError):
+    pass
+
+
 @dataclass
 class ValveState:
     state: str = "UNCONFIGURED"
@@ -136,6 +140,19 @@ class ValveSubsystem:
                 if st.state in {"MOVING", "HOMING"}:
                     st.state = "REFERENCED" if self.sender._motion.homed[cfg.axis] else "CALIBRATED_UNREFERENCED" if cfg.calibrated else "UNCONFIGURED"
                 await self.sender._q.send(f"M211 S{soft_state}", timeout=self.sender._timeouts.diagnostics)
+            except _ValveHomeCancelled:
+                self.invalidate([cfg.axis])
+                st.service_release = "PENDING"
+                try:
+                    await self.quickstop(cfg)
+                    if soft_state is not None:
+                        await self.sender._q.send(f"M211 S{soft_state}", timeout=self.sender._timeouts.diagnostics)
+                    await self.sender._q.send(f"M18 {cfg.axis}", timeout=self.sender._timeouts.diagnostics)
+                    st.service_release = "ACKNOWLEDGED"
+                except BaseException:
+                    await self.sender.abort()
+                    raise
+                raise
             except BaseException as exc:
                 cfg = self.config(self.active_valve or cfg.name)
                 st = self.states[cfg.name]
@@ -179,6 +196,8 @@ class ValveSubsystem:
             move_timeout=self.sender._timeouts.move, on_poll=poll,
             stop_reason=lambda: "cancelled" if self.sender._home_cancel.is_set() else None)
         if not outcome.reached:
+            if outcome.stop_reason == "cancelled":
+                raise _ValveHomeCancelled("Home крана остановлен оператором")
             raise ControllerError(f"Valve {phase} stopped: {outcome.stop_reason}")
         if self.sender._q.transport_name == "mock":
             await self.quickstop(cfg)
@@ -226,6 +245,7 @@ class ValveSubsystem:
         return actual
 
     async def _home(self, cfg, st):
+        await self.sender.hold_references()
         self.sender._motion.invalidate([cfg.axis])
         self.sender._reference_counts.pop(cfg.axis, None)
         st.current, st.commissioning = "UNKNOWN", False
@@ -272,6 +292,9 @@ class ValveSubsystem:
                 result = await self._home(cfg, st)
             finally:
                 self.invalidate([cfg.axis])
+        if not any(self.sender._motion.homed.values()):
+            await self.sender._q.send("M84 S120", timeout=self.sender._timeouts.diagnostics)
+            self.sender.reference_hold_active = False
         return {**result, "referenced": False, "release": st.service_release}
 
     async def home_all(self):
@@ -319,6 +342,17 @@ class ValveSubsystem:
             await self._home(cfg, st)
             st.commissioning = True
             st.saved_a = st.saved_b = False
+
+    async def park(self, name, target, feedrate):
+        cfg = self.config(name)
+        if not cfg.calibrated or not self.sender._motion.homed[cfg.axis]:
+            raise StateError("Valve reference required before parking")
+        if not math.isfinite(target) or target * self.direction(cfg) >= 0:
+            raise ValueError("Parking must remain away from HOME")
+        async with self.operation(name, "MOVING") as (cfg, st):
+            position = await self.finite_move(cfg, target, feedrate)
+            st.current = "PARK"
+        return position
 
     async def move_referenced(self, name, delta, feedrate):
         cfg = self.config(name)

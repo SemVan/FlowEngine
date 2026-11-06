@@ -19,6 +19,7 @@ from flowengine.api.router_motion import _wrap_errors
 from flowengine.config_store import find_saved, list_saved, load_yaml, save_yaml
 from flowengine.errors import ControllerError, StateError, TransportError
 from flowengine.hardware.endstop_seek import seek_switch
+from flowengine.hardware.group_seek import find_group_edges, move_group_away, seek_group
 from flowengine.hardware.homing import EndstopHoming
 from flowengine.schemas import ConfigurationProfile
 from flowengine.schemas.device import AxisCalibration
@@ -403,10 +404,6 @@ async def worker(ctx: AppContext, s, run: Hold) -> None:
 
             run.state = "stopping"
             active(ctx, s)
-            if soft_endstops_disabled:
-                await command(ctx, "M211 S1")
-                soft_endstops_disabled = False
-
             position, pressed, count = await snapshot(ctx, s["axis"])
             active(ctx, s)
             s.update(position=position, pressed=pressed)
@@ -422,10 +419,36 @@ async def worker(ctx: AppContext, s, run: Hold) -> None:
                 }
                 s["_last_contact_edge"] = None
                 s["_last_contact_recordable"] = True
+                # касание уже записано; кнопку можно подписать после отхода
+                run.phase = "final release"
+                released = await seek_switch(
+                    ctx.queue, axis=s["axis"], channel=f"{s['axis'].lower()}_min",
+                    direction=-run.direction, feedrate=run.latch_feedrate,
+                    target_pressed=False,
+                    timeout_s=max(5, 60 * (run.backoff_mm + 2) / run.latch_feedrate),
+                    steps_per_unit=s["_axis_config"].steps_per_unit,
+                    diagnostics_timeout=ctx.runtime.timeouts.diagnostics,
+                    move_timeout=ctx.runtime.timeouts.move,
+                    stop_reason=lambda: "cancelled" if s["_epoch"] != ctx.sender.reference_epoch else None,
+                )
+                if not released.reached:
+                    raise ValueError("Не удалось освободить концевик после касания")
+                pressed = await _fixed_relative_move(
+                    ctx, s, run, -run.direction, run.backoff_mm,
+                    min(run.feedrate, 600.0),
+                )
+                if pressed:
+                    raise ValueError("Концевик остался нажат после финального отхода")
+                position, pressed, _ = await snapshot(ctx, s["axis"])
+                s.update(position=position, pressed=pressed)
             elif not pressed:
                 s["_last_contact"] = None
                 s["_last_contact_edge"] = None
                 s["_last_contact_recordable"] = False
+
+            if soft_endstops_disabled:
+                await command(ctx, "M211 S1")
+                soft_endstops_disabled = False
 
             ctx.motion.invalidate()
             run.state, run.stop_reason = "stopped", stop_reason
@@ -1097,14 +1120,70 @@ async def _auto_calibrate_axis(ctx: AppContext, job: dict, axis: str) -> dict:
     }
 
 
+async def _auto_calibrate_pair(ctx: AppContext, job: dict) -> dict:
+    axes = job["axes"]
+    configs = {a: ctx.device_map.axis(a) for a in axes}
+    old = {a: configs[a].axis_calibration for a in axes}
+    if any(old[a] is None or not configs[a].endstop_channels_shared for a in axes):
+        raise ValueError("Сначала сохраните направления и калибровку X/Y")
+    if any(len(set(axes) & set(g.axes)) > 1 for g in ctx.device_map.endstop_inputs):
+        raise ValueError("Нужны раздельные входы X/Y")
+    seek = {a: min(old[a].seek_feedrate, ctx.motion.max_feedrate(a), 1200) for a in axes}
+    latch = {a: min(old[a].latch_feedrate, seek[a]) for a in axes}
+    backoff = {a: old[a].backoff_mm for a in axes}
+    timeouts = {a: max(30, min(300, 120 * old[a].travel / seek[a] + 20)) for a in axes}
+    motor_direction = {a: 1 if old[a].positive_toward_motor else -1 for a in axes}
+    cancelled = job["cancel"].is_set
+
+    async def progress(detail):
+        await _auto_progress(ctx, job, axis="X/Y", phase="parallel", detail=detail)
+
+    async def clear(directions):
+        await seek_group(ctx.sender, axes, directions, latch, False,
+                         {a: max(5, 60 * (backoff[a] + 2) / latch[a]) for a in axes},
+                         cancelled=cancelled, progress=progress)
+        await move_group_away(ctx.sender, axes, directions, backoff, latch, cancelled=cancelled)
+
+    ctx.motion.invalidate(axes)
+    await ctx.sender.hold_references()
+    await command(ctx, "M211 S0")
+    try:
+        motor = await find_group_edges(ctx.sender, axes, motor_direction, seek, latch, backoff,
+                                       timeouts, cancelled=cancelled, progress=progress)
+        far_direction = {a: -motor_direction[a] for a in axes}
+        await clear(far_direction)
+        far = await find_group_edges(ctx.sender, axes, far_direction, seek, latch, backoff,
+                                     timeouts, cancelled=cancelled, progress=progress)
+        await clear(motor_direction)
+    finally:
+        await command(ctx, "M211 S1")
+    measured = {}
+    for axis in axes:
+        motor[axis]["approach_direction"] = motor_direction[axis]
+        far[axis]["approach_direction"] = -motor_direction[axis]
+        calibrated = _build_auto_calibration(configs[axis], old[axis], motor[axis], far[axis])
+        _save_and_apply_auto_calibration(ctx, axis, calibrated)
+        measured[axis] = calibrated
+    if cancelled():
+        raise StateError("Автокалибровка остановлена оператором")
+    home = await ctx.sender._home_syringes(axes, progress)
+    return {a: {"axis": a, "travel": measured[a].travel, "travel_steps": measured[a].travel_steps,
+                "motor": motor[a], "far": far[a], "home_side": measured[a].home_side,
+                "measurement_source": measured[a].measurement_source,
+                "home": home[a], "referenced": True, "simultaneous": True} for a in axes}
+
+
 async def _auto_job_runner(ctx: AppContext, job: dict) -> None:
     job["state"] = "running"
     ctx.sender._home_cancel.clear()
     try:
-        for axis in job["axes"]:
-            if job["cancel"].is_set():
-                raise StateError("Автокалибровка остановлена оператором")
-            job["results"][axis] = await _auto_calibrate_axis(ctx, job, axis)
+        if set(job["axes"]) == {"X", "Y"}:
+            job["results"].update(await _auto_calibrate_pair(ctx, job))
+        else:
+            for axis in job["axes"]:
+                if job["cancel"].is_set():
+                    raise StateError("Автокалибровка остановлена оператором")
+                job["results"][axis] = await _auto_calibrate_axis(ctx, job, axis)
         job.update(state="completed", axis=None, phase="done", detail="Автокалибровка завершена; оси откалиброваны и REFERENCED")
         if ctx.state.state == State.MOVING:
             await ctx.state.transition(State.CONNECTED_IDLE, detail=job["detail"])

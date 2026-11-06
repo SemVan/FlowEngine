@@ -17,6 +17,8 @@
       <a href="/">◈ &nbsp; Управление</a>
       <a href="/procedures">▷ &nbsp; Сценарии</a>
       <a href="/config">⚙ &nbsp; Мои профили</a>
+      <a href="/config/editor" target="_blank" rel="noopener">✎ &nbsp; Редактор YAML ↗</a>
+      <a href="/terminal" target="_blank" rel="noopener">›_ &nbsp; G-code ↗</a>
       <a href="/calibration">⇄ &nbsp; Калибровка X / Y</a>
       <a href="/valves">↔ &nbsp; Valves · Краны</a>
       <a href="/commissioning">⚒ &nbsp; Наладка</a>
@@ -31,6 +33,7 @@
   <main>
     <div class="session-strip"><span id="session-mode">Подключение…</span><span>Активный профиль <b id="active-profile">—</b></span></div>
     {% block content %}{% endblock %}
+    {% include "partials/serial_terminal.html" %}
   </main>
   <footer class="logbar">
     <button id="abort-btn" type="button">■ СТОП · M410</button>
@@ -40,6 +43,7 @@
   </footer>
   <script type="module" src="/static/js/main.js"></script>
   <script type="module" src="/static/js/personal.js"></script>
+  <script type="module" src="/static/js/serial-terminal.js?v=1"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

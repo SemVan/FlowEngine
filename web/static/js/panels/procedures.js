@@ -46,8 +46,16 @@ function syncEditor() {
 }
 
 function updateButtons() {
-  for (const id of ["save-proc", "copy-proc", "new-proc", "preview-proc", "apply-json", "add-step", "save-run-defaults"]) $(id).disabled = busy || running;
-  $("run-proc").disabled = busy || running || $("proc-draft").checked || !procedure.steps.length || procedure.steps.some(s => s.op === "require_setup");
+  for (const id of ["save-proc", "copy-proc", "new-proc", "preview-proc", "apply-json", "add-step", "save-run-defaults", "add-parameter"]) $(id).disabled = busy || running;
+  const reason = busy ? "Подождите, выполняется загрузка или сохранение."
+    : running ? "Сейчас выполняется процедура."
+    : !procedure.steps.length ? "Добавьте хотя бы один шаг."
+    : procedure.steps.some(s => s.op === "require_setup") ? "В процедуре остались шаги «Требуется настройка»."
+    : "";
+  $("run-proc").disabled = Boolean(reason);
+  $("run-proc").textContent = $("proc-draft").checked ? "Проверить и запустить" : "Запустить процедуру";
+  $("run-proc").title = reason || "Выполнить выбранную процедуру на аппарате";
+  $("proc-launch-hint").textContent = reason || `Выбрана: ${procedure.title || procedure.name}. Перед запуском проверим параметры и нули.`;
   $("abort-proc").disabled = !running;
   for (const button of $("proc-steps").querySelectorAll("button")) {
     const index = Number(button.dataset.index);
@@ -59,13 +67,15 @@ function updateButtons() {
 }
 
 function describeStep(s) {
-  if (s.op === "home_valve") return `${valveNames[s.name] || s.name}: поиск HOME по одному концевику, затем отход`;
+  if (s.op === "home_valve") return `${valveNames[s.name] || s.name}: HOME${s.only_if_needed ? " только при потере нуля" : " повторно"}, затем отход`;
   if (s.op === "set_valve") return `${valveNames[s.name] || s.name} → сохранённое положение ${s.position}${s.feedrate != null ? "; скорость " + s.feedrate + " ед/мин" : ""}${s.acceleration != null ? "; ускорение " + s.acceleration : ""}`;
-  if (s.op === "home") return `Последовательно: ${s.axes?.join(", ") || "все оси"}`;
-  if (s.op === "move") return `${s.axis}: ${s.to != null ? "в координату " + s.to : "на " + s.by} ${s.units === "steps" ? "шагов" : "ед. оси"}${s.feedrate != null ? "; скорость " + s.feedrate : ""}`;
-  if (s.op === "move_multi") return `Совместно: ${Object.entries(s.axes).map(([a, n]) => `${a} → ${n}`).join("; ")}${s.relative ? " (смещения)" : ""}`;
+  if (s.op === "home") return `${s.axes?.join(", ") || "все оси"}: HOME ${s.only_if_needed ? "только при потере нуля" : "повторно"}`;
+  if (s.op === "move") return `${s.axis}: ${s.to != null ? "в координату " + s.to : "на " + s.by} ${s.units === "steps" ? "шагов" : axisUnit(s.axis)}${s.duration_s != null ? "; номинальное время " + s.duration_s + " с" : s.feedrate != null ? "; скорость " + s.feedrate + " " + speedUnit(s.axis, s.speed_units) : ""}`;
+  if (s.op === "move_for") return `${s.axis}: ${s.direction === -1 ? "−" : "+"}, ${s.feedrate} ${speedUnit(s.axis, s.speed_units)} в течение ${s.seconds} с (без учёта разгона/торможения)`;
+  if (s.op === "move_multi_for") return `Вместе ${s.seconds} с: ` + Object.entries(s.axes).map(([axis, move]) => `${axis}: ${move.direction === -1 ? "−" : "+"}${move.feedrate} ${speedUnit(axis, move.speed_units)}`).join("; ");
+  if (s.op === "move_multi") return `Совместно: ${Object.entries(s.axes).map(([a, n]) => `${a} → ${n}${s.axis_feedrates ? ", " + s.axis_feedrates[a] + " " + speedUnit(a) : ""}`).join("; ")}${s.relative ? " (смещения)" : ""}${s.duration_s != null ? "; номинальное время " + s.duration_s + " с" : s.feedrate != null ? "; общая скорость " + s.feedrate : ""}`;
   if (s.op === "pump") return `${pumpNames[s.name] || s.name}: ${s.volume_ul} мкл; ${s.flow_ul_min} мкл/мин; ${s.direction === "aspirate" ? "забор" : "подача"}`;
-  if (s.op === "pump_multi") return Object.entries(s.pumps).map(([name, d]) => `${pumpNames[name] || name}: ${d.volume_ul} мкл, ${d.flow_ul_min} мкл/мин`).join("; ");
+  if (s.op === "pump_multi") return Object.entries(s.pumps).map(([name, d]) => `${pumpNames[name] || name}: ${d.volume_ul} мкл, ${d.flow_ul_min} мкл/мин${typeof d.volume_ul === "number" && typeof d.flow_ul_min === "number" ? ", номинально " + (60 * d.volume_ul / d.flow_ul_min).toFixed(2) + " с" : ""}`).join("; ");
   if (s.op === "dwell") return `${s.seconds} с`;
   if (s.op === "log" || s.op === "require_setup") return s.message;
   if (s.op === "checkpoint") return s.name;
@@ -109,6 +119,13 @@ function resetStepEditor() {
   renderStepFields();
 }
 
+function rememberProcedure(name) {
+  try { localStorage.setItem("flowengine.procedure", name); } catch (_) { }
+  const url = new URL(window.location.href);
+  url.searchParams.set("procedure", name);
+  window.history.replaceState(null, "", url);
+}
+
 function setProcedure(value, saved = true) {
   if (!value || typeof value !== "object" || !Array.isArray(value.steps)) throw new Error("У процедуры должен быть список steps");
   procedure = structuredClone(value);
@@ -121,19 +138,23 @@ function setProcedure(value, saved = true) {
   renderParameterFields();
   renderSteps();
   savedText = saved ? JSON.stringify(procedure) : "";
+  if (saved) rememberProcedure(procedure.name);
 }
 
 function mayReplaceProcedure() {
   syncHeader();
+  if (!procedure.steps.length && !procedure.title && !procedure.description && !Object.keys(procedure.parameters).length) return true;
   return (editing === null && JSON.stringify(procedure) === savedText)
     || window.confirm("В редакторе есть несохранённые изменения. Открыть другую процедуру и потерять их?");
 }
 
-function renderParameterFields() {
+function renderParameterFields(preserve = false) {
+  let previous = {};
+  if (preserve) { try { previous = parseParameters(); } catch (_) { } }
   const values = {};
   $("proc-parameter-fields").replaceChildren();
   for (const [name, definition] of Object.entries(procedure.parameters)) {
-    const label = el("label", name, "parameter-field");
+    const label = el("label", definition.description || name, "parameter-field");
     const input = definition.type === "boolean" ? el("select") : el("input");
     if (definition.type === "boolean") {
       for (const [v, text] of [["", "Не задано"], ["true", "Да"], ["false", "Нет"]]) {
@@ -145,15 +166,58 @@ function renderParameterFields() {
       if (definition.minimum != null) input.min = definition.minimum;
       if (definition.maximum != null) input.max = definition.maximum;
     }
-    if (definition.default != null) { values[name] = definition.default; input.value = definition.default; }
+    const current = previous[name] ?? definition.default;
+    if (current != null) { values[name] = current; input.value = current; }
     input.dataset.parameter = name;
     input.dataset.type = definition.type;
-    label.append(input, el("small", definition.description));
+    const remove = el("button", "Убрать параметр"); remove.type = "button"; remove.dataset.removeParameter = name;
+    label.append(input, el("small", `Ссылка в шаге: ${"${" + name + "}"}`), remove);
     $("proc-parameter-fields").append(label);
   }
   if (!Object.keys(procedure.parameters).length) $("proc-parameter-fields").textContent = "У этой процедуры нет параметров запуска.";
   $("proc-parameters").value = JSON.stringify(values, null, 2);
+  $("numeric-parameters").replaceChildren(...Object.entries(procedure.parameters)
+    .filter(([, definition]) => ["number", "integer"].includes(definition.type))
+    .map(([name, definition]) => { const option = el("option"); option.value = "${" + name + "}"; option.label = definition.description || name; return option; }));
 }
+
+$("add-parameter").addEventListener("click", () => {
+  if (busy || running) return;
+  try {
+    const name = $("parameter-name").value.trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error("Имя параметра: латинские буквы, цифры и _, первая — буква или _.");
+    const type = $("parameter-type").value;
+    const raw = $("parameter-default").value.trim();
+    if (!raw) throw new Error("Укажите значение по умолчанию.");
+    let value = raw;
+    if (["number", "integer"].includes(type)) {
+      value = Number(raw);
+      if (!Number.isFinite(value) || (type === "integer" && !Number.isInteger(value))) throw new Error("Укажите число нужного типа.");
+    } else if (type === "boolean") {
+      if (!["true", "false", "да", "нет"].includes(raw.toLowerCase())) throw new Error("Для Да / нет введите true/false или да/нет.");
+      value = ["true", "да"].includes(raw.toLowerCase());
+    }
+    const definition = {type, description: $("parameter-description").value.trim(), default: value};
+    if (["number", "integer"].includes(type)) {
+      for (const [key, id] of [["minimum", "parameter-min"], ["maximum", "parameter-max"]]) {
+        if ($(id).value.trim()) definition[key] = Number($(id).value);
+      }
+      if (definition.minimum != null && value < definition.minimum || definition.maximum != null && value > definition.maximum) throw new Error("Значение по умолчанию должно быть внутри границ.");
+    }
+    procedure.parameters[name] = definition;
+    const values = parseParameters(); values[name] = value;
+    $("proc-parameters").value = JSON.stringify(values);
+    renderParameterFields(true); syncEditor();
+    show(`Параметр ${name} добавлен. В числовом поле шага выберите ${"${" + name + "}"}.`);
+  } catch (error) { show(error.message); }
+});
+
+$("proc-parameter-fields").addEventListener("click", event => {
+  const name = event.target.dataset.removeParameter;
+  if (!name || busy || running) return;
+  if (JSON.stringify(procedure.steps).includes("${" + name + "}")) { show("Параметр используется в шагах. Сначала замените ссылки на него."); return; }
+  delete procedure.parameters[name]; renderParameterFields(true); syncEditor();
+});
 
 $("proc-parameter-fields").addEventListener("input", () => {
   const values = {};
@@ -177,7 +241,10 @@ function field(key, title, value = "", choices = null) {
     if (value !== "" && ![...input.options].some(o => o.value === String(value))) {
       const option = el("option", `${value} (нет в текущем профиле)`); option.value = value; input.append(option);
     }
-  } else input.type = "text";
+  } else {
+    input.type = "text";
+    if (["feedrate", "duration_s", "seconds", "value", "acceleration", "volume_ul", "flow_ul_min", "times"].includes(key)) input.setAttribute("list", "numeric-parameters");
+  }
   if (value != null && value !== "") input.value = String(value);
   label.append(input);
   $("step-fields").append(label);
@@ -186,13 +253,31 @@ function field(key, title, value = "", choices = null) {
 
 function help(text) { $("step-fields").append(el("p", text, "hint step-help")); }
 function axisChoices() { return axes().map(a => [a.marlin_axis, `${a.marlin_axis} · ${a.name} (${a.units})`]); }
+function motionAxisChoices() { return axisChoices().filter(([axis]) => !valves().some(v => v.axis === axis)); }
+function axisUnit(axis) { const unit = axes().find(a => a.marlin_axis === axis)?.units || "ед. оси"; return ({mm:"мм", deg:"°"})[unit] || unit; }
+function speedUnit(axis, unit = "axis/min") { return unit === "steps/s" ? "STEP/с" : axisUnit(axis) + (unit === "axis/s" ? "/с" : "/мин"); }
 function valveChoices() { return valves().map(v => [v.name, `${valveNames[v.name] || v.name} · ${v.axis}`]); }
 function pumpChoices() { return pumps().map(p => [p.name, `${pumpNames[p.name] || p.name} · ${p.axis}`]); }
 function speedFields(s) { field("feedrate", "Скорость, ед. оси/мин (пусто — из профиля)", s.feedrate); field("acceleration", "Ускорение, ед. оси/с² (необязательно)", s.acceleration); }
+function motionTimingFields(s, independent = false) {
+  const choices = [["speed", independent ? "Расстояние и общая скорость" : "Расстояние и скорость"], ["duration", independent ? "Расстояние и общее время" : "Расстояние и время"]];
+  if (independent) choices.push(["independent", "Своя скорость для каждого насоса"]);
+  const mode = field("timing", "Как задать ход", s.axis_feedrates ? "independent" : s.duration_s != null ? "duration" : "speed", choices);
+  const speed = field("feedrate", "Скорость (пусто — из профиля)", s.feedrate);
+  const duration = field("duration_s", "Номинальное время хода, с", s.duration_s);
+  const toggle = () => {
+    speed.closest("label").hidden = mode.value !== "speed";
+    duration.closest("label").hidden = mode.value !== "duration";
+    if (independent) for (const label of $("step-fields").querySelectorAll("[data-individual-speed]")) label.hidden = mode.value !== "independent";
+  };
+  mode.addEventListener("change", toggle); toggle();
+  field("acceleration", "Ускорение, ед. оси/с² (необязательно)", s.acceleration);
+}
 
 function renderStepFields(s = {}) {
   $("step-fields").replaceChildren();
   const op = $("step-op").value;
+  if (["home", "home_valve"].includes(op)) field("only_if_needed", "Когда искать ноль", String(s.only_if_needed ?? (s.op ? false : true)), [["true", "Только если привязка потеряна"], ["false", "Повторно, даже если ноль уже найден"]]);
   if (op === "set_valve" || op === "home_valve") {
     const selectedValve = field("name", "Кран", s.name, valveChoices());
     if (op === "set_valve") {
@@ -212,27 +297,58 @@ function renderStepFields(s = {}) {
   } else if (["home", "motors", "require_reference"].includes(op)) {
     field("axes", "Оси через запятую", s.axes?.join(",") ?? (op === "motors" ? "" : "X,Y"));
     if (op === "motors") field("enabled", "Действие", String(s.enabled ?? false), [["false", "Отключить удержание"], ["true", "Включить удержание"]]);
-    help(op === "require_reference" ? "Проверяет привязку без движения. Ноль автоматически не устанавливает." : op === "home" ? "Home использует сохранённую калибровку personal. Пустое поле — все узлы с механическим HOME, без вращающегося U." : "Пустое поле — все моторы. После отключения удержания координаты теряют привязку; перед следующим движением потребуется Home.");
+    help(op === "require_reference" ? "Проверяет привязку без движения. Ноль автоматически не устанавливает." : op === "home" ? "Готовые оси можно пропустить. Полный промер хода не повторяется. Пустое поле — все узлы с HOME, без U." : "Отключение удержания завершает сеанс и сбрасывает нули. Для серии процедур оставьте моторы включёнными; в конце всей работы отпустите их кнопкой над конструктором.");
   } else if (op === "move") {
-    field("axis", "Ось", s.axis, axisChoices());
+    field("axis", "Ось", s.axis, motionAxisChoices());
     field("kind", "Перемещение", s.to != null ? "to" : "by", [["to", "В координату"], ["by", "На смещение"]]);
     field("value", "Величина или ${parameter}", s.to ?? s.by);
-    speedFields(s);
+    motionTimingFields(s);
     field("units", "Единицы перемещения", s.units || "axis", [["axis", "Единицы оси из профиля"], ["steps", "Импульсы STEP"]]);
     field("speed_units", "Единицы скорости", s.speed_units || "axis/min", ["axis/min", "axis/s", "steps/s"]);
-    help("Краны перемещаются отдельным действием «Положение крана». Единицы оси могут отличаться от градусов поворота выходного редуктора.");
+    help("Выберите расстояние со скоростью либо расстояние со временем. Заданное время не учитывает разгон и торможение. Краны задаются действием «Положение крана».");
+  } else if (op === "move_for") {
+    field("axis", "Ось", s.axis, motionAxisChoices());
+    field("direction", "Направление", String(s.direction ?? 1), [["1", "+"], ["-1", "−"]]);
+    field("feedrate", "Скорость", s.feedrate ?? 120);
+    field("speed_units", "Единицы скорости", s.speed_units || "axis/min", [["axis/min", "Единицы оси/мин (X/Y: мм/мин)"], ["axis/s", "Единицы оси/с (X/Y: мм/с)"], ["steps/s", "STEP/с"]]);
+    field("seconds", "Время движения, с", s.seconds ?? 2);
+    field("acceleration", "Ускорение, ед. оси/с² (необязательно)", s.acceleration);
+    help("Планируется ход: скорость × время. Например, 120 мм/мин × 2 с = 4 мм. Разгон и торможение увеличивают фактическое время. Нужен HOME; настройки объёма здесь не используются.");
+  } else if (op === "move_multi_for") {
+    for (const axis of axes().filter(a => ["syringe_pump", "peristaltic_pump"].includes(a.kind))) {
+      const move = s.axes?.[axis.marlin_axis];
+      const row = el("fieldset"); row.dataset.timedAxis = axis.marlin_axis;
+      const pump = pumps().find(p => p.axis === axis.marlin_axis);
+      row.append(el("legend", `${axis.marlin_axis} · ${pumpNames[pump?.name] || axis.name}`));
+      const enabledLabel = el("label", "Участвует"); const enabled = el("input"); enabled.type = "checkbox"; enabled.dataset.timedEnabled = ""; enabled.checked = Boolean(move); enabledLabel.prepend(enabled); row.append(enabledLabel);
+      const directionLabel = el("label", "Направление"); const direction = el("select"); direction.dataset.timedDirection = "";
+      for (const [value, title] of [["1", "+"], ["-1", "−"]]) { const option = el("option", title); option.value = value; direction.append(option); }
+      direction.value = String(move?.direction ?? 1); directionLabel.append(direction); row.append(directionLabel);
+      const speedLabel = el("label", `Скорость привода ${axis.marlin_axis}`); const speed = el("input"); speed.dataset.timedFeedrate = ""; speed.setAttribute("list", "numeric-parameters"); speed.value = move?.feedrate ?? 120; speedLabel.append(speed); row.append(speedLabel);
+      const unitsLabel = el("label", "Единицы скорости"); const units = el("select"); units.dataset.timedUnits = "";
+      for (const value of ["axis/min", "axis/s", "steps/s"]) { const option = el("option", speedUnit(axis.marlin_axis, value)); option.value = value; units.append(option); }
+      units.value = move?.speed_units || "axis/min"; unitsLabel.append(units); row.append(unitsLabel);
+      const toggle = () => { direction.disabled = speed.disabled = units.disabled = !enabled.checked; };
+      enabled.addEventListener("change", toggle); toggle(); $("step-fields").append(row);
+    }
+    field("seconds", "Общее номинальное время подачи, с", s.seconds ?? 10);
+    field("acceleration", "Ускорение (необязательно)", s.acceleration);
+    help("Оба насоса работают весь этап одним совместным ходом. У каждого своя скорость и направление; расстояния рассчитываются автоматически. Разгон и торможение добавляют время. Для объёмов и расходов в мкл используйте «Насосы вместе: объём и расход каждого» после измерения коэффициентов.");
   } else if (op === "move_multi") {
     const grid = el("div", undefined, "multi-axis-fields");
     for (const axis of axes().filter(a => !valves().some(v => v.axis === a.marlin_axis))) {
-      const row = el("label", `${axis.marlin_axis} · ${axis.name} (${axis.units})`);
+      const row = el("fieldset"); row.append(el("legend", `${axis.marlin_axis} · ${axis.name} (${axisUnit(axis.marlin_axis)})`));
+      const distanceLabel = el("label", "Координата / смещение");
       const input = el("input"); input.dataset.multiAxis = axis.marlin_axis; input.placeholder = "Пусто — не участвует"; input.value = s.axes?.[axis.marlin_axis] ?? "";
-      row.append(input); grid.append(row);
+      distanceLabel.append(input); row.append(distanceLabel);
+      const speedLabel = el("label", `Скорость ${axis.marlin_axis}, ${speedUnit(axis.marlin_axis)}`); speedLabel.dataset.individualSpeed = "";
+      const speed = el("input"); speed.dataset.axisFeedrate = axis.marlin_axis; speed.setAttribute("list", "numeric-parameters"); speed.value = s.axis_feedrates?.[axis.marlin_axis] ?? axis.feedrate_default;
+      speedLabel.append(speed); row.append(speedLabel); grid.append(row);
     }
     $("step-fields").append(grid);
     field("relative", "Координаты", String(s.relative ?? false), [["false", "Абсолютные"], ["true", "Смещения"]]);
-    speedFields(s);
-    field("duration_s", "Время, с (вместо скорости)", s.duration_s);
-    help("Один согласованный ход с общим завершением. Ускорение добавляет время. Это не параллельный поиск концевиков.");
+    motionTimingFields(s, true);
+    help("Для двух насосов выберите «Своя скорость для каждого насоса»: задайте ход и скорость X и Y. Насосы начнут вместе, каждый завершит свой ход отдельно. Значения в мм и мм/мин для X/Y; калибровка объёма не нужна. Пустая координата исключает ось. Разгон и торможение влияют на время.");
   } else if (op === "pump") {
     field("name", "Насос", s.name, pumpChoices());
     field("volume_ul", "Объём, мкл", s.volume_ul);
@@ -251,9 +367,16 @@ function renderStepFields(s = {}) {
       const select = el("select"); select.dataset.doseField = "direction";
       for (const [v, text] of [["dispense", "Подача"], ["aspirate", "Забор"]]) { const option = el("option", text); option.value = v; select.append(option); }
       select.value = dose.direction || "dispense"; row.append(select); $("step-fields").append(row);
+      const time = el("output", "Время рассчитаем из объёма и расхода"); row.append(time);
+      const updateTime = () => {
+        const volume = Number(row.querySelector('[data-dose-field="volume_ul"]').value);
+        const flow = Number(row.querySelector('[data-dose-field="flow_ul_min"]').value);
+        time.textContent = volume > 0 && flow > 0 ? `Номинальное время: ${(60 * volume / flow).toFixed(2)} с` : "Время рассчитаем при проверке параметров";
+      };
+      row.addEventListener("input", updateTime); updateTime();
     }
     field("acceleration", "Ускорение (необязательно)", s.acceleration);
-    help("Заполните объём и расход минимум двух насосов. Время объём/расход должно совпадать; пустые насосы не участвуют.");
+    help("Каждому насосу задайте свой объём и расход. Оба начинают вместе; время каждого считается как 60 × объём / расход. Закончивший свою дозу насос останавливается. Для одновременного окончания задайте одинаковое отношение объём/расход. Нужны измеренные коэффициенты насосов; пустые насосы не участвуют.");
   } else if (op === "dwell") field("seconds", "Пауза, с", s.seconds ?? 1);
   else if (op === "log" || op === "require_setup") {
     field("message", op === "log" ? "Текст сообщения" : "Что требуется настроить", s.message);
@@ -300,12 +423,30 @@ function buildStep() {
   if (op === "set_valve") { s.position = value("position"); numeric(["feedrate", "acceleration"], false); }
   if (["home", "motors", "require_reference"].includes(op)) { const a = value("axes").split(",").map(v => v.trim()).filter(Boolean); s.axes = a.length ? a : null; if (op === "require_reference" && !a.length) throw new Error("Укажите оси для проверки нулей"); }
   if (op === "motors") s.enabled = value("enabled") === "true";
-  if (op === "move") { s.axis = value("axis"); s[value("kind")] = number(value("value")); s.units = value("units"); s.speed_units = value("speed_units"); numeric(["feedrate", "acceleration"], false); }
+  if (["home", "home_valve"].includes(op)) s.only_if_needed = value("only_if_needed") === "true";
+  if (op === "move") { s.axis = value("axis"); s[value("kind")] = number(value("value")); s.units = value("units"); s.speed_units = value("speed_units"); numeric(value("timing") === "duration" ? ["duration_s"] : ["feedrate"], value("timing") === "duration"); numeric(["acceleration"], false); }
+  if (op === "move_for") { s.axis = value("axis"); s.direction = Number(value("direction")); s.speed_units = value("speed_units"); numeric(["feedrate", "seconds"]); numeric(["acceleration"], false); }
+  if (op === "move_multi_for") {
+    s.axes = {};
+    for (const row of $("step-fields").querySelectorAll("[data-timed-axis]")) {
+      if (!row.querySelector("[data-timed-enabled]").checked) continue;
+      s.axes[row.dataset.timedAxis] = {direction: Number(row.querySelector("[data-timed-direction]").value), feedrate: number(row.querySelector("[data-timed-feedrate]").value), speed_units: row.querySelector("[data-timed-units]").value};
+    }
+    if (Object.keys(s.axes).length < 2) throw new Error("Выберите минимум два насоса");
+    numeric(["seconds"]); numeric(["acceleration"], false);
+  }
   if (op === "move_multi") {
     s.axes = {};
     for (const input of $("step-fields").querySelectorAll("[data-multi-axis]")) { if (input.value.trim()) s.axes[input.dataset.multiAxis] = number(input.value); }
     if (Object.keys(s.axes).length < 2) throw new Error("Для совместного движения укажите минимум две оси");
-    s.relative = value("relative") === "true"; numeric(["feedrate", "duration_s", "acceleration"], false);
+    s.relative = value("relative") === "true";
+    if (value("timing") === "independent") {
+      s.axis_feedrates = {};
+      for (const input of $("step-fields").querySelectorAll("[data-axis-feedrate]")) {
+        if (input.dataset.axisFeedrate in s.axes) s.axis_feedrates[input.dataset.axisFeedrate] = number(input.value);
+      }
+    } else numeric(value("timing") === "duration" ? ["duration_s"] : ["feedrate"], value("timing") === "duration");
+    numeric(["acceleration"], false);
   }
   if (op === "pump") { numeric(["volume_ul", "flow_ul_min"]); s.direction = value("direction"); numeric(["acceleration"], false); }
   if (op === "pump_multi") {
@@ -359,6 +500,7 @@ async function saveCurrent() {
   const saved = await api.saveProcedure(procedure.name, procedure);
   syncEditor();
   savedText = JSON.stringify(procedure);
+  rememberProcedure(procedure.name);
   await reload();
   return saved;
 }
@@ -374,7 +516,9 @@ async function action(fn) {
 function previewReport(report) {
   show(report, `Проверено ${report.steps.length} шагов. Команды на аппарат не отправлялись.`);
   const issues = report.execution_issues || [];
-  if (report.draft) $("proc-feedback").append(el("p", "Черновик: полный запуск отключён."));
+  if (report.draft) $("proc-feedback").append(el("p", "Черновик: при запуске проверим готовность и снимем эту отметку после подтверждения запуска."));
+  for (const warning of report.session_warnings || []) $("proc-feedback").append(el("p", warning, "hint"));
+  issues.push(...(report.readiness_issues || []));
   if (issues.length) {
     const list = el("ul", undefined, "preview-issues");
     for (const issue of issues) list.append(el("li", issue
@@ -463,8 +607,16 @@ $("export-proc").addEventListener("click", () => {
   const link = el("a"); link.href = url; link.download = `${procedure.name.replace(/[^A-Za-z0-9_-]/g, "_")}.json`; link.click(); URL.revokeObjectURL(url);
 });
 $("run-proc").addEventListener("click", () => {
-  if (!window.confirm(`Запустить всю процедуру «${$("proc-title").value || $("proc-name").value}» на подключённом аппарате?`)) return;
-  action(async () => { await saveCurrent(); show(await api.runProcedure(procedure.name, parseParameters()), "Процедура запущена."); await refreshStatus(); });
+  action(async () => {
+    await saveCurrent();
+    const report = await api.previewProcedure(procedure.name, parseParameters());
+    if (report.execution_issues.length || report.readiness_issues?.length) { previewReport(report); return; }
+    const state = await api.state();
+    if (state.state !== "connected_idle") { show(`Аппарат занят или не подключён: ${state.detail || state.state}`); return; }
+    if (!window.confirm(`Запустить «${procedure.title || procedure.name}» на ${state.transport === "mock" ? "симуляторе" : "подключённом аппарате"}?${procedure.draft ? "\nПроверка пройдена, отметка черновика будет снята." : ""}${report.session_warnings?.length ? "\n\n" + report.session_warnings.join("\n") : ""}`)) return;
+    if (procedure.draft) { $("proc-draft").checked = false; await saveCurrent(); }
+    show(await api.runProcedure(procedure.name, parseParameters()), "Процедура запущена."); await refreshStatus();
+  });
 });
 $("abort-proc").addEventListener("click", async () => {
   try { show(await api.abortProcedure(), "Процедура остановлена. Привязка координат потеряна."); await refreshStatus(); }
@@ -484,8 +636,18 @@ async function init() {
   try {
     hardware = await api.config();
     await reload();
-    const startup = knownProcedures.find(p => p.name === "startup_draft" && p.ok);
-    setProcedure(startup ? await api.procedure(startup.name) : emptyProcedure());
+    const requested = new URL(window.location.href).searchParams.get("procedure");
+    let remembered = null;
+    try { remembered = localStorage.getItem("flowengine.procedure"); } catch (_) { }
+    const selected = knownProcedures.find(p => p.name === requested && p.ok)
+      || (!requested && knownProcedures.find(p => p.name === remembered && p.ok));
+    if (requested && !selected) {
+      setProcedure(emptyProcedure(), false);
+      show(`Процедура «${requested}» не найдена. Выберите её из списка слева.`);
+    } else {
+      const initial = selected;
+      setProcedure(initial ? await api.procedure(initial.name) : emptyProcedure(), Boolean(initial));
+    }
     await refreshStatus();
   } catch (error) { show(`Не удалось загрузить конструктор: ${error.message}`); }
   finally { busy = false; updateButtons(); }

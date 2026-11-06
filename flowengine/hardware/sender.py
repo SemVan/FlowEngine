@@ -17,6 +17,8 @@ from typing import Any
 
 from flowengine.errors import ControllerError, StateError
 from flowengine.hardware.endstop_seek import seek_switch
+from flowengine.hardware.coordinated import independent_segments, timed_pump_moves
+from flowengine.hardware.group_seek import find_group_edges, move_group_away
 from flowengine.hardware.homing.base import HomingStrategy
 from flowengine.hardware.motion import MotionModel
 from flowengine.hardware.queue import CommandQueue, CommandResult
@@ -40,6 +42,8 @@ class GcodeSender:
         accel_cap: float | None = None,
     ) -> None:
         self._q = queue
+        from flowengine.parking_store import discard_on_command
+        queue.before_command = lambda command: discard_on_command(queue.transport_name, command)
         self._motion = motion
         self._map = device_map
         self._homing = homing
@@ -57,6 +61,7 @@ class GcodeSender:
         self.reference_epoch = 0
         self._home_cancel = asyncio.Event()
         self._home_active = False
+        self.reference_hold_active = False
         self.auto_calibration_job: dict[str, Any] | None = None
         self.step_check_job: dict[str, Any] | None = None
         from flowengine.hardware.valves import ValveSubsystem
@@ -67,7 +72,25 @@ class GcodeSender:
         await self.valves.set_valve(name, position, feedrate)
 
     async def home_valve(self, name: str):
+        await self.hold_references()
         return await self.valves.home_valve(name)
+
+    async def hold_references(self) -> None:
+        if not self.reference_hold_active:
+            # иначе прошивка может сама отпустить моторы между процедурами
+            await self._q.send("M84 S0", timeout=self._timeouts.diagnostics)
+            self.reference_hold_active = True
+
+    async def finish_reference_session(self) -> None:
+        if not self.reference_hold_active:
+            return
+        try:
+            await self.motors(False)
+        except Exception:
+            await self.abort()
+            for axis in self._map.axes:
+                if len(axis.marlin_axis) == 1:
+                    await self._q.request_motor_release(axis.marlin_axis)
 
     async def _check_manual_endstops(self, axes: list[str]) -> None:
         guarded = [a for a in axes if self._map.axis(a).axis_calibration is not None]
@@ -165,9 +188,14 @@ class GcodeSender:
         feedrate: NumberValue | None = None,
         relative: bool = False,
         duration_s: NumberValue | None = None,
+        axis_feedrates: dict[str, NumberValue] | None = None,
     ) -> dict[str, Any]:
         axes = {a: float(v) for a, v in axes.items()}
         self.valves.reject_axes(list(axes))
+        if axis_feedrates is not None:
+            if feedrate is not None or duration_s is not None:
+                raise ValueError("choose individual speeds OR common feedrate/duration")
+            return await self.move_independent(axes, axis_feedrates, relative)
         feedrate = float(feedrate) if feedrate is not None else None
         duration_s = float(duration_s) if duration_s is not None else None
         if not axes:
@@ -223,6 +251,89 @@ class GcodeSender:
             "feedrate": speed,
             "warning": "duration excludes acceleration/deceleration; not independent planners",
         }
+
+    async def move_multi_for(self, axes, seconds):
+        seconds = float(seconds)
+        distances, speeds = timed_pump_moves(self._map, axes, seconds, self._motion._feedrate_cap)
+        result = await self.move_independent(distances, speeds, relative=True, common_duration_s=seconds)
+        return {**result, "common_interval": True,
+                "warning": "Насосы работают одним совместным ходом. Время номинальное: разгон и торможение добавляют время; объём и расход в мкл требуют измерения."}
+
+    async def move_independent(self, axes, axis_feedrates, relative=False, *, common_duration_s=None):
+        self.valves.reject_axes(list(axes))
+        if not axes or set(axes) != set(axis_feedrates):
+            raise ValueError("Задайте скорость для каждой выбранной оси")
+        if any(len(a) != 1 or a == "E" for a in axes):
+            raise ValueError("Совместный ход требует отдельных буквенных осей")
+        if len({self._map.axis(a).units for a in axes}) != 1:
+            raise ValueError("Для совместного хода нужны одинаковые единицы осей")
+        if any(len(set(axes) & set(g.axes)) > 1 for g in self._map.endstop_inputs):
+            raise ValueError("Оси используют общий вход концевиков")
+        speeds = {a: float(v) for a, v in axis_feedrates.items()}
+        for axis, speed in speeds.items():
+            if not math.isfinite(speed) or not 0 < speed <= self._motion.max_feedrate(axis):
+                raise ValueError(f"{axis}: скорость должна быть больше 0 и не выше {self._motion.max_feedrate(axis):g} ед/мин")
+            if relative:
+                self._motion.plan_relative(axis, float(axes[axis]), speed)
+            else:
+                self._motion.plan_absolute(axis, float(axes[axis]), speed)
+        await self._check_manual_endstops(list(axes))
+        starts = await self.wait_idle()
+        starts = {a: starts[a] for a in axes}
+        targets = {a: starts[a] + float(v) if relative else float(v) for a, v in axes.items()}
+        tolerance = {a: max(.001, .5 / self._map.axis(a).steps_per_unit + .0001) for a in axes}
+        for a in axes:
+            if abs(targets[a] - starts[a]) <= tolerance[a]:
+                starts[a] = targets[a]
+        segments, durations = independent_segments(starts, targets, speeds, common_duration_s)
+        deadline = asyncio.get_running_loop().time() + max(durations.values()) + max(5, self._timeouts.move)
+        try:
+            if segments:
+                await self._q.send("G90", timeout=self._timeouts.diagnostics)
+            for segment in segments:
+                await self._check_manual_endstops(list(axes))
+                await self._q.send("G1 " + " ".join(f"{a}{v:.6f}" for a, v in segment["targets"].items())
+                                   + f" F{segment['feedrate']:.3f}", timeout=self._timeouts.move)
+                for a, value in segment["targets"].items():
+                    self._motion.accept_target(a, value)
+                    self._expected[a] = value
+            while segments:
+                await self._check_manual_endstops(list(axes))
+                report = await self._q.send("M114 R", timeout=self._timeouts.diagnostics)
+                actual = report.position or {}
+                if not targets.keys() <= actual.keys():
+                    raise ControllerError("Плата не сообщила координаты всех насосов")
+                if all(abs(actual[a] - targets[a]) <= tolerance[a] for a in targets):
+                    break
+                if asyncio.get_running_loop().time() >= deadline:
+                    raise ControllerError("Совместный ход насосов не завершился за отведённое время")
+                await asyncio.sleep(.04)
+            await self._check_manual_endstops(list(axes))
+            actual = await self.wait_idle()
+        except BaseException:
+            await self.abort()
+            raise
+        return {"nominal_duration_s": max(durations.values()), "segments": segments,
+                "axes": {a: {"target": targets[a], "feedrate": speeds[a],
+                               "nominal_duration_s": durations[a], "position": actual[a]} for a in axes},
+                "warning": "У каждого насоса своя скорость. Разгон, торможение и переходы между участками влияют на время."}
+
+    async def move_for(self, axis: str, direction: int, feedrate: float, seconds: float,
+                       speed_units: str = "axis/min") -> dict[str, Any]:
+        self.valves.reject_axes([axis])
+        _, speed = self.convert_move(axis, 0, feedrate, speed_units=speed_units)
+        seconds = float(seconds)
+        if direction not in {-1, 1} or speed is None or not math.isfinite(speed) or speed <= 0:
+            raise ValueError("positive finite speed and direction +1/-1 required")
+        if not math.isfinite(seconds) or seconds <= 0:
+            raise ValueError("seconds must be finite and positive")
+        distance = direction * speed * seconds / 60
+        plan = self._motion.plan_relative(axis, distance, speed)
+        if speed > plan.feedrate + 1e-9:
+            raise ValueError(f"{axis}: заданная скорость выше предела; уменьшите скорость")
+        await self.jog(axis, distance, speed)
+        return {"axis": axis, "distance": distance, "feedrate": speed,
+                "nominal_duration_s": seconds, "warning": "время без учёта разгона и торможения"}
 
     def _check_pump_route(self, pump, direction: str) -> None:
         if not pump.allowed_routes:
@@ -286,6 +397,9 @@ class GcodeSender:
             ("M17" if enabled else "M18") + " " + " ".join(selected),
             timeout=self._timeouts.diagnostics,
         )
+        if not enabled and not any(self._motion.homed.values()) and self.reference_hold_active:
+            await self._q.send("M84 S120", timeout=self._timeouts.diagnostics)
+            self.reference_hold_active = False
 
     async def pump_multi(self, doses: dict[str, PumpDose]) -> dict[str, Any]:
         if len(doses) < 2:
@@ -313,17 +427,13 @@ class GcodeSender:
             plan = self._motion.plan_relative(axis, distance, speed)
             if speed > plan.feedrate + 1e-9:
                 raise ValueError(f"requested pump flow exceeds configured speed limit on {axis}")
-        axis_durations = dict(zip(axes, durations, strict=True))
-        elapsed = 0.0
-        segments = []
-        for deadline in sorted(set(durations)):
-            dt = deadline - elapsed
-            segment = {a: d * dt / axis_durations[a] for a, d in axes.items()
-                       if axis_durations[a] > elapsed}
-            segments.append(await self.move_multi(segment, relative=True, duration_s=dt))
-            elapsed = deadline
-        return {"nominal_duration_s": max(durations), "segments": segments,
-                "warning": "Finish times are nominal; acceleration and planner junctions affect timing."}
+        speeds = {axis: 60 * abs(distance) / duration for (axis, distance), duration in zip(axes.items(), durations, strict=True)}
+        result = await self.move_independent(axes, speeds, relative=True)
+        return {**result, "motion_complete": True,
+                "pumps": {name: {"volume_ul": float(dose.volume_ul), "flow_ul_min": float(dose.flow_ul_min),
+                                  "direction": dose.direction,
+                                  "nominal_duration_s": 60 * float(dose.volume_ul) / float(dose.flow_ul_min)}
+                          for name, dose in doses.items()}}
 
     @property
     def reference_counts(self) -> dict[str, int]:
@@ -336,6 +446,7 @@ class GcodeSender:
         return {axis: side for axis, side in self._reference_sides.items() if homed.get(axis)}
 
     async def abort(self) -> None:
+        prepared_session = self.reference_hold_active
         release_valve = self.valves.active_service or self.valves.active_valve
         self.reference_epoch += 1
         self.manual_session = None
@@ -356,6 +467,15 @@ class GcodeSender:
                 if len(cfg.axis) == 1:
                     written = await self._q.request_motor_release(cfg.axis)
                 st.service_release = "REQUESTED_UNCONFIRMED" if written else "UNKNOWN"
+            if prepared_session:
+                for axis in self._map.axes:
+                    if len(axis.marlin_axis) == 1:
+                        await self._q.request_motor_release(axis.marlin_axis)
+                try:
+                    await self._q.request_stepper_timeout(120)
+                except Exception:
+                    log.warning("таймер отключения драйверов после Stop не подтверждён")
+                self.reference_hold_active = False
 
     def invalidate_positions(self) -> None:
         self.valves.invalidate()
@@ -380,7 +500,7 @@ class GcodeSender:
                          if re.search(rf"{re.escape(a.marlin_axis)}(?=[+\-.\d\s]|$)", args)}
             if (float(token[1:]) == 28 and not mentioned) or mentioned & valve_axes:
                 raise StateError("Raw valve movement/G28 blocked; use Valves API")
-        readonly = token in {"M105", "M114", "M115", "M119", "M122", "M503"}
+        readonly = token in {"M105", "M114", "M115", "M119", "M122", "M503"} or command.upper() == "M906"
         readonly = readonly or command.upper() == "M211"
         if not readonly and not confirmed:
             raise ValueError("confirm raw command: it may move hardware or change settings")
@@ -709,6 +829,7 @@ class GcodeSender:
             await self._q.send("M400", timeout=self._timeouts.move)
 
         self._motion.invalidate([axis])
+        await self.hold_references()
         try:
             await self._q.send("M211 S0", timeout=self._timeouts.diagnostics)
             soft_endstops_disabled = True
@@ -875,6 +996,51 @@ class GcodeSender:
             if soft_endstops_disabled:
                 await self._q.send("M211 S1", timeout=self._timeouts.diagnostics)
 
+    async def _home_syringes(self, axes, progress=None):
+        epoch = self.reference_epoch
+        calibrations = {a: self._map.axis(a).axis_calibration for a in axes}
+        if any(cal is None for cal in calibrations.values()):
+            raise ValueError("Сначала сохраните калибровку X/Y")
+        if any(len(set(axes) & set(group.axes)) > 1 for group in self._map.endstop_inputs):
+            raise ValueError("Совместный HOME требует раздельные входы X/Y")
+        directions = {a: calibrations[a].home_approach_direction for a in axes}
+        seek = {a: min(calibrations[a].seek_feedrate, self._motion.max_feedrate(a)) for a in axes}
+        latch = {a: min(calibrations[a].latch_feedrate, seek[a]) for a in axes}
+        backoff = {a: calibrations[a].backoff_mm for a in axes}
+        timeouts = {a: max(self._timeouts.homing, min(300, 120 * calibrations[a].travel / seek[a] + 20)) for a in axes}
+        cancelled = self._home_cancel.is_set
+        await self.hold_references()
+        await self._q.send("M211 S0", timeout=self._timeouts.diagnostics)
+        try:
+            edges = await find_group_edges(self, axes, directions, seek, latch, backoff, timeouts,
+                                          cancelled=cancelled, progress=progress)
+            await self._home_progress(progress, "X/Y одновременно: финальный отход от микриков")
+            await move_group_away(self, axes, {a: -directions[a] for a in axes}, backoff, latch,
+                                  cancelled=cancelled)
+            await self.wait_idle()
+            details = {}
+            for axis in axes:
+                cal = calibrations[axis]
+                home_count = edges[axis]["step_count"]
+                coordinate = cal.home_coordinate + (self._counts[axis] - home_count) / self._map.axis(axis).steps_per_unit
+                await self._q.send(f"G92 {axis}{coordinate:.6f}", timeout=self._timeouts.diagnostics)
+                details[axis] = {"axis": axis, "home_side": cal.home_side,
+                                 "reference_coordinate": cal.home_coordinate, "position": coordinate,
+                                 "reference_count": home_count, "backoff_mm": backoff[axis],
+                                 "referenced": True, "simultaneous": True, "endstop": "OPEN"}
+            if cancelled() or epoch != self.reference_epoch:
+                raise StateError("HOME X/Y остановлен оператором")
+            for axis in axes:
+                self._motion.mark_referenced(axis, details[axis]["position"])
+                self._reference_counts[axis] = edges[axis]["step_count"]
+                self._reference_sides[axis] = calibrations[axis].home_side
+            return details
+        except BaseException:
+            self._motion.invalidate(axes)
+            raise
+        finally:
+            await self._q.send("M211 S1", timeout=self._timeouts.diagnostics)
+
     async def home(
         self,
         axes: list[str] | None = None,
@@ -899,7 +1065,28 @@ class GcodeSender:
                 raise ValueError(f"{a}: для вращающегося насоса подтвердите исходную координату в Наладке")
             if cfg.homing_strategy != "endstop":
                 raise ValueError("sensorless/crash homing is not implemented")
+            if not self.valves.for_axis(a) and not (
+                a in {"X", "Y"} and cfg.axis_calibration is not None and cfg.endstop_channels_shared
+            ) and any(a in group.axes and len(group.axes) > 1 for group in self._map.endstop_inputs):
+                raise ValueError("shared-input home requires a verified sequential seek procedure, not G28")
 
+        simultaneous = [a for a in targets if a in {"X", "Y"}
+                        and self._map.axis(a).axis_calibration is not None
+                        and self._map.axis(a).endstop_channels_shared]
+        if len(simultaneous) > 1 and any(
+            len(set(simultaneous) & set(group.axes)) > 1 for group in self._map.endstop_inputs
+        ):
+            raise ValueError("Совместный HOME требует раздельные входы X/Y")
+        if simultaneous:
+            switches = await self.read_endstops()
+            for axis in simultaneous:
+                if switches.get(f"{axis.lower()}_min") is True:
+                    raise ValueError(
+                        f"{axis}: общий концевик уже нажат, а его сторона после запуска неизвестна. "
+                        "Сначала освободите его через калибровочный ручной проход, затем повторите Home."
+                    )
+
+        await self.hold_references()
         self._motion.invalidate(targets)
         for a in targets:
             self._reference_counts.pop(a, None)
@@ -909,12 +1096,17 @@ class GcodeSender:
         self._home_active = True
         details: dict[str, Any] = {}
         try:
+            if len(simultaneous) > 1:
+                details.update(await self._home_syringes(simultaneous, progress))
             for axis in targets:
                 if self._home_cancel.is_set():
                     raise StateError("Home остановлен оператором")
+                if axis in details:
+                    continue
                 cfg = self._map.axis(axis)
                 valve = self.valves.for_axis(axis)
                 if valve:
+                    await self._home_progress(progress, f"Home {axis}: поиск нуля крана {valve.name}")
                     details[axis] = await self.home_valve(valve.name)
                 elif cfg.kind == "valve":
                     raise StateError("Valve axis has no ValveConfig; G28 blocked")
@@ -934,6 +1126,12 @@ class GcodeSender:
                     self._motion.invalidate(targets)
                     raise ControllerError("Home прерван; привязка потеряна")
             return details
+        except StateError:
+            await self.motors(False, targets)
+            raise
+        except BaseException:
+            await self.abort()
+            raise
         finally:
             self._home_active = False
             self._home_cancel.clear()

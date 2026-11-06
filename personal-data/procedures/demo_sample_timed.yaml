@@ -1,0 +1,80 @@
+name: demo_sample_timed
+title: 'Пример: набор и подача по времени'
+description: 'После общего HOME: кран промывки в К, начальная подача X до 10 мм в
+  резервуар-кювету (сразу после HOME около 8 мм), затем переключение на пробу H2O
+  и набор по времени, переключение на кювету и подача по тому же времени. По умолчанию
+  120 мм/мин × 2 с = 4 мм на набор и 4 мм на подачу. В конце удержание и нули сохраняются.
+  Объём не измерен; разгон и торможение увеличивают фактическое время.'
+version: 1
+draft: true
+parameters:
+  speed_mm_min:
+    type: number
+    description: Скорость поршня X, мм/мин
+    default: 120.0
+    minimum: 30.0
+    maximum: 180.0
+  time_s:
+    type: number
+    description: Номинальное время набора и подачи, с
+    default: 2.0
+    minimum: 0.5
+    maximum: 2.5
+  pause_s:
+    type: number
+    description: Пауза после набора и подачи, с
+    default: 2.0
+    minimum: 0.5
+    maximum: 10.0
+steps:
+- title: Проверить нули X и кранов A/C
+  op: require_reference
+  axes:
+  - X
+  - A
+  - C
+- title: 'Промывка в К: соединить X с краном сэмплера'
+  op: set_valve
+  name: wash_valve
+  position: КП-ПРОКАЧКА
+- title: 'Сэмплер: открыть путь к резервуару-кювете'
+  op: set_valve
+  name: sample_valve
+  position: КС-ЗАБОР
+- title: 'Подготовительная подача: установить X на 10 мм'
+  op: move
+  axis: X
+  to: 10.0
+  feedrate: ${speed_mm_min}
+  units: axis
+  speed_units: axis/min
+- title: 'Сэмплер: открыть путь к пробе H2O'
+  op: set_valve
+  name: sample_valve
+  position: КС-ПРОКАЧКА
+- title: Набрать воду из пробы по времени
+  op: move_for
+  axis: X
+  direction: -1
+  feedrate: ${speed_mm_min}
+  seconds: ${time_s}
+  speed_units: axis/min
+- title: Пауза после набора
+  op: dwell
+  seconds: ${pause_s}
+- title: 'Сэмплер: переключить выход на кювету'
+  op: set_valve
+  name: sample_valve
+  position: КС-ЗАБОР
+- title: Подать воду в резервуар-кювету по времени
+  op: move_for
+  axis: X
+  direction: 1
+  feedrate: ${speed_mm_min}
+  seconds: ${time_s}
+  speed_units: axis/min
+- title: Пауза после подачи
+  op: dwell
+  seconds: ${pause_s}
+- op: log
+  message: цикл завершён; рабочие позиции и нули сохранены для следующего запуска

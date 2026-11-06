@@ -1,0 +1,30 @@
+<section class="panel" id="instrument-home-panel">
+  <h2>Рабочая сессия · парковка</h2>
+  <p>После завершённой парковки следующий запуск восстанавливает координаты автоматически, без калибровки и HOME.
+     В конце сессии узлы возвращаются в позиции из конфига, моторы отпускаются.</p>
+  <div class="constructor-actions">
+    <button type="button" id="instrument-session-start" disabled>Начать из парковки</button>
+    <button type="button" class="primary" id="instrument-park-finish" disabled>Припарковать и завершить сессию</button>
+    <a class="primary" href="/config/editor" target="_blank" rel="noopener">Редактор YAML · отдельное окно ↗</a>
+    <a href="/terminal" target="_blank" rel="noopener">G-code · отдельное окно ↗</a>
+  </div>
+  <p id="instrument-home-status" role="status" aria-live="polite">Проверяем состояние…</p>
+  <p id="instrument-home-references"></p>
+  <p id="instrument-parking-positions" class="hint"></p>
+  <details><summary>Настройка парковки и восстановление нулей</summary>
+    <button type="button" id="instrument-parking-capture" disabled>Запомнить текущие положения как парковку</button>
+    <p class="hint">Один раз выставьте узлы в исходные положения и запомните их либо впишите координаты в конфиг.
+      Дальше используйте обычную парковку. Насос U при завершении останавливается вместе с остальными моторами.</p>
+    <button type="button" id="instrument-home-start" disabled>Восстановить ненайденные нули · HOME</button>
+    <button type="button" id="instrument-home-cancel" disabled>Остановить поиск</button>
+    <button type="button" id="instrument-release-all" disabled>Просто отпустить моторы · без парковки</button>
+    <p class="hint">HOME нужен при первой настройке и после потери исходного положения. Полный промер X/Y — отдельная редкая операция наладки.
+      Сохранённая парковка предполагает, что аппарат не двигали руками после выключения.</p>
+  </details>
+  <details><summary>Токи драйверов</summary>
+    <button type="button" id="instrument-read-currents">Прочитать M906 · без движения</button>
+    <pre id="instrument-currents">Показания ещё не прочитаны.</pre>
+    <p class="hint">M906 показывает рабочий RMS-ток. Отдельный ток удержания зависит от прошивки.
+      Чтение ничего не меняет; пониженный ток нужно проверить по уверенности хода и нагреву.</p>
+  </details>
+</section>

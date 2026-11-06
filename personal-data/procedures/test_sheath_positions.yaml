@@ -1,0 +1,30 @@
+name: test_sheath_positions
+title: Тест крана шифа B
+description: КО-ПРОКАЧКА → КО-ЗАБОР → КО-ПРОКАЧКА. Нужен выполненный HOME. В конце
+  мотор B отпускается, привязка теряется. Насосы не включаются.
+version: 1
+draft: false
+parameters: {}
+steps:
+- op: require_reference
+  axes:
+  - B
+- op: set_valve
+  name: sheath_valve
+  position: КО-ПРОКАЧКА
+- op: dwell
+  seconds: 2.0
+- op: set_valve
+  name: sheath_valve
+  position: КО-ЗАБОР
+- op: dwell
+  seconds: 2.0
+- op: set_valve
+  name: sheath_valve
+  position: КО-ПРОКАЧКА
+- op: motors
+  enabled: false
+  axes:
+  - B
+- op: log
+  message: тест B завершён, мотор отпущен; перед следующим движением нужен HOME

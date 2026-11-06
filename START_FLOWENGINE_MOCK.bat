@@ -71,7 +71,7 @@ echo The browser will open automatically.
 echo Keep this window open while using FlowEngine.
 echo.
 
-start "" "%VENV_PY%" -c "import time,webbrowser; time.sleep(3); webbrowser.open('http://127.0.0.1:8765/')"
+start "" /b "%VENV_PY%" -m flowengine.browser_open --url http://127.0.0.1:8765/
 "%VENV_PY%" -m flowengine --mock
 set "EXITCODE=%ERRORLEVEL%"
 

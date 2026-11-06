@@ -16,7 +16,7 @@ from flowengine.config_store import save_yaml
 from flowengine.errors import ConfigError, FlowEngineError
 from flowengine.loaders import list_procedures, load_procedure
 from flowengine.procedures import expand_procedure
-from flowengine.procedures.preflight import execution_issues
+from flowengine.procedures.preflight import execution_issues, reference_issues, session_warnings
 from flowengine.schemas import CallStep, Procedure, RepeatStep
 
 log = logging.getLogger(__name__)
@@ -101,6 +101,10 @@ async def preview(
         )
     except (FlowEngineError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    from flowengine.parking_store import read_receipt
+    ready = ctx.motion.homed
+    if read_receipt(ctx):
+        ready.update(dict.fromkeys(ctx.device_map.parking.positions, True))
     return {
         "name": name,
         "draft": source.draft,
@@ -109,6 +113,8 @@ async def preview(
         ],
         "step_paths": expanded.step_paths,
         "execution_issues": execution_issues(expanded.procedure, ctx.device_map, ctx.runtime),
+        "readiness_issues": reference_issues(expanded.procedure, ctx.device_map, ready),
+        "session_warnings": session_warnings(expanded.procedure),
         "warning": "Static preview sends no commands; positions, firmware settings and wiring still require verification.",
     }
 
@@ -139,6 +145,8 @@ async def run_step(
             issues = execution_issues(expanded.procedure, ctx.device_map, ctx.runtime)
             if issues:
                 raise ValueError("; ".join(issues))
+            from flowengine.parking import restore_parking
+            await restore_parking(ctx)
             await ctx.runner.run_selected(
                 name,
                 step_number,
@@ -151,6 +159,8 @@ async def run_step(
             )
             if issues:
                 raise ValueError("; ".join(issues))
+            from flowengine.parking import restore_parking
+            await restore_parking(ctx)
             await ctx.runner.run_one(name, step_number, step)
     except (FlowEngineError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -174,6 +184,10 @@ async def run(
         source = _load_named(name)
         expanded = expand_procedure(source, _load_named, parameters)
         issues = execution_issues(expanded.procedure, ctx.device_map, ctx.runtime)
+        if not issues:
+            from flowengine.parking import restore_parking
+            await restore_parking(ctx)
+        issues += reference_issues(expanded.procedure, ctx.device_map, ctx.motion.homed)
         if issues:
             raise ValueError("; ".join(issues))
         ctx.runner.start(expanded.procedure, expanded.step_paths)

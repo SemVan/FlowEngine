@@ -26,10 +26,12 @@
         <button id="save-proc" type="button">Сохранить</button>
         <button id="copy-proc" type="button">Создать копию</button>
         <button id="preview-proc" type="button">Проверить без движения</button>
-        <button id="run-proc" class="primary" type="button">Запустить процедуру</button>
+        <button id="run-proc" class="primary" type="button" aria-describedby="proc-launch-hint" disabled>Запустить процедуру</button>
         <button id="abort-proc" type="button">Остановить процедуру</button>
       </div>
-      <p class="hint">Черновик сохраняется и проверяется. После настройки можно проверить отдельный шаг на аппарате. Пункты «Требуется настройка» нужно заменить перед полным запуском.</p>
+      <p id="proc-launch-hint" class="hint" role="status" aria-live="polite">Загружаем выбранную процедуру…</p>
+      <p class="hint">«Проверить и запустить» проверяет черновик и снимает эту отметку при подтверждении запуска.
+        Если не хватает HOME или настройки, причина появится ниже. Отдельные шаги можно проверять кнопками в списке.</p>
       <p id="proc-status" class="phase-tag" aria-live="polite">Нет запущенной процедуры</p>
       <h3>Порядок действий</h3>
       <ol id="proc-steps" class="procedure-steps"></ol>
@@ -44,13 +46,15 @@
               <option value="home">Найти ноль осей</option>
               <option value="require_reference">Проверить наличие нулей</option>
               <option value="move">Переместить одну ось</option>
+              <option value="move_for">Движение по времени</option>
               <option value="move_multi">Совместное перемещение осей</option>
+              <option value="move_multi_for">Насосы вместе: скорости и время</option>
               <option value="pump">Подать объём насосом</option>
-              <option value="pump_multi">Совместная подача насосами</option>
+              <option value="pump_multi">Насосы вместе: объём и расход каждого</option>
               <option value="dwell">Пауза</option>
               <option value="call">Выполнить другую процедуру</option>
               <option value="repeat">Повторить другую процедуру</option>
-              <option value="motors">Включить / отключить удержание</option>
+              <option value="motors">Удержание / завершить сеанс (сброс нулей)</option>
               <option value="read_sensors">Прочитать датчики</option>
               <option value="log">Сообщение в журнал</option>
               <option value="checkpoint">Отметка этапа</option>
@@ -64,11 +68,25 @@
         <button id="add-step" type="button">Добавить шаг</button>
         <button id="cancel-step-edit" type="button" hidden>Отменить изменение</button>
       </fieldset>
-      <details id="run-parameters">
+      <details id="run-parameters" open>
         <summary>Параметры запуска</summary>
         <p class="hint">Поля подставляются вместо ссылок вроде <code>${travel}</code> в шагах.</p>
         <div id="proc-parameter-fields" class="parameter-fields"></div>
+        <datalist id="numeric-parameters"></datalist>
         <button id="save-run-defaults" type="button">Сохранить параметры как значения по умолчанию</button>
+        <details>
+          <summary>Добавить или изменить параметр</summary>
+          <p class="hint">Например: имя speed, значение 120. В поле скорости шага выберите или введите ${speed}.</p>
+          <div class="parameter-fields">
+            <label>Имя параметра <input id="parameter-name" placeholder="speed" pattern="[A-Za-z_][A-Za-z0-9_]*"></label>
+            <label>Подпись и единицы <input id="parameter-description" placeholder="Скорость X, мм/мин"></label>
+            <label>Тип <select id="parameter-type"><option value="number">Число</option><option value="integer">Целое число</option><option value="string">Текст</option><option value="boolean">Да / нет</option></select></label>
+            <label>Значение по умолчанию <input id="parameter-default" placeholder="120"></label>
+            <label>Минимум (необязательно) <input id="parameter-min" type="number" step="any"></label>
+            <label>Максимум (необязательно) <input id="parameter-max" type="number" step="any"></label>
+          </div>
+          <button id="add-parameter" type="button">Добавить / обновить параметр</button>
+        </details>
         <details>
           <summary>Значения в JSON</summary>
           <textarea id="proc-parameters" class="json-editor compact" spellcheck="false">{}</textarea>

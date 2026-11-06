@@ -65,6 +65,7 @@ class MockTransport(Transport):
         self.step_loss_direction: int | None = None
         self.probe_stuck: bool | None = None
         self.driver_enabled: dict[str, bool] = {}
+        self.stepper_timeout_s = 120.0
         self._steps_per_unit: dict[str, float] = defaultdict(lambda: 80.0)
         self._counts: dict[str, int] = defaultdict(int)
         self._acceleration = {"P": 3000.0, "R": 3000.0, "T": 3000.0}
@@ -212,6 +213,11 @@ class MockTransport(Transport):
             await self._inbox.put("ok")
             return
         if p.startswith(("M17", "M18", "M84")):
+            timeout = re.search(r"\bS(\d+(?:\.\d+)?)", p)
+            if timeout and p.startswith(("M18", "M84")):
+                self.stepper_timeout_s = float(timeout.group(1))
+                await self._inbox.put("ok")
+                return
             axes = _HOME_AXIS_TOKEN.findall(p[3:]) or list(self._positions) or ["X", "Y", "Z"]
             for a in axes:
                 self.driver_enabled[a] = p.startswith("M17")
@@ -271,6 +277,7 @@ class MockTransport(Transport):
                 or ["X", "Y", "Z"]
             )
             for axis in tokens:
+                self.driver_enabled[axis] = True
                 self._positions[axis] = 0.0
                 self._homed[axis] = True
                 self._home_released.add(axis)

@@ -255,6 +255,13 @@ class AutosamplerConfig(BaseModel):
     )
 
 
+class ParkingConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+    positions: dict[str, float] = Field(default_factory=dict)
+    feedrates: dict[str, float] = Field(default_factory=dict)
+
+
 class DeviceMap(BaseModel):
     """Top-level device map. The single source of truth for which physical thing
     is on which controller axis."""
@@ -269,6 +276,7 @@ class DeviceMap(BaseModel):
     autosampler: AutosamplerConfig | None = None
     endstop_inputs: list[EndstopInput] = Field(default_factory=list)
     analog_inputs: list[AnalogInput] = Field(default_factory=list)
+    parking: ParkingConfig = Field(default_factory=ParkingConfig)
 
     @model_validator(mode="after")
     def _check_unique_axes(self) -> DeviceMap:
@@ -317,6 +325,25 @@ class DeviceMap(BaseModel):
             ):
                 if slot not in axis_set:
                     raise ValueError(f"autosampler references unknown axis {slot}")
+        parking = self.parking
+        if parking.positions:
+            required = {a.marlin_axis for a in self.axes if a.kind in {"syringe_pump", "valve"}}
+            if set(parking.positions) != required:
+                raise ValueError("parking.positions must include every syringe and valve axis, without rotating pumps")
+            for axis, target in parking.positions.items():
+                cfg = self.axis(axis)
+                if cfg.axis_calibration and not 0 < target < cfg.axis_calibration.travel:
+                    raise ValueError(f"{axis}: parking must lie between the released endstops")
+                valve = next((v for v in self.valves if v.axis == axis), None)
+                if valve:
+                    direction = valve.direction_toward_home or (-1 if cfg.home_direction == "min" else 1)
+                    if target * direction >= 0:
+                        raise ValueError(f"{axis}: parking must be away from the valve endstop")
+        if not set(parking.feedrates) <= set(parking.positions):
+            raise ValueError("parking.feedrates must name configured parking axes")
+        for axis, speed in parking.feedrates.items():
+            if not 0 < speed <= self.axis(axis).feedrate_max:
+                raise ValueError(f"{axis}: invalid parking feedrate")
         return self
 
     def axis(self, marlin_axis: str) -> AxisConfig:

@@ -1,0 +1,35 @@
+name: independent_pumps_example
+title: Два насоса с разными скоростями
+description: Пример совместного хода X/Y в мм. После одной общей подготовки HOME X
+  проходит +4 мм со скоростью 120 мм/мин, Y — -4 мм со скоростью 60 мм/мин. Направления
+  и маршрут жидкости проверить на установке перед запуском. Объёмная калибровка не
+  используется; в конце удержание сохраняется.
+draft: true
+parameters:
+  speed_x:
+    type: number
+    description: Скорость X, мм/мин
+    default: 120
+    minimum: 1
+    maximum: 1200
+  speed_y:
+    type: number
+    description: Скорость Y, мм/мин
+    default: 60
+    minimum: 1
+    maximum: 1200
+steps:
+- op: require_reference
+  title: Нули насосов уже найдены
+  axes:
+  - X
+  - Y
+- op: move_multi
+  title: X и Y одновременно, скорости отдельно
+  relative: true
+  axes:
+    X: 4
+    Y: -4
+  axis_feedrates:
+    X: ${speed_x}
+    Y: ${speed_y}

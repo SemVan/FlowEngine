@@ -26,6 +26,7 @@ class _Step(BaseModel):
         for name in (
             "feedrate",
             "duration_s",
+            "seconds",
             "acceleration",
             "volume_ul",
             "flow_ul_min",
@@ -48,6 +49,7 @@ class MoveStep(_Step):
     to: NumberValue | None = None
     by: NumberValue | None = None
     feedrate: NumberValue | None = None
+    duration_s: NumberValue | None = None
     units: Literal["axis", "steps"] = "axis"
     speed_units: Literal["axis/min", "axis/s", "steps/s"] = "axis/min"
     acceleration: NumberValue | None = None
@@ -56,7 +58,32 @@ class MoveStep(_Step):
     def _check_exactly_one(self) -> MoveStep:
         if (self.to is None) == (self.by is None):
             raise ValueError("`move` requires exactly one of `to` or `by`")
+        if self.duration_s is not None and self.feedrate is not None:
+            raise ValueError("choose duration_s OR feedrate")
         return self
+
+
+class MoveForStep(_Step):
+    op: Literal["move_for"]
+    axis: str
+    direction: Literal[-1, 1] = 1
+    feedrate: NumberValue
+    seconds: NumberValue
+    speed_units: Literal["axis/min", "axis/s", "steps/s"] = "axis/min"
+    acceleration: NumberValue | None = None
+
+
+class AxisFeed(_Step):
+    direction: Literal[-1, 1] = 1
+    feedrate: NumberValue
+    speed_units: Literal["axis/min", "axis/s", "steps/s"] = "axis/min"
+
+
+class MoveMultiForStep(_Step):
+    op: Literal["move_multi_for"]
+    axes: dict[str, AxisFeed] = Field(min_length=2)
+    seconds: NumberValue
+    acceleration: NumberValue | None = None
 
 
 class MoveMultiStep(_Step):
@@ -65,6 +92,7 @@ class MoveMultiStep(_Step):
     feedrate: NumberValue | None = None
     relative: bool = False
     duration_s: NumberValue | None = None
+    axis_feedrates: dict[str, NumberValue] | None = None
     acceleration: NumberValue | None = None
 
     @model_validator(mode="after")
@@ -73,6 +101,13 @@ class MoveMultiStep(_Step):
             raise ValueError("move_multi requires nonempty axes")
         if self.duration_s is not None and self.feedrate is not None:
             raise ValueError("choose duration_s OR feedrate")
+        if self.axis_feedrates is not None:
+            if self.duration_s is not None or self.feedrate is not None:
+                raise ValueError("choose individual speeds OR common feedrate/duration")
+            if set(self.axis_feedrates) != set(self.axes):
+                raise ValueError("individual speeds must be specified for every selected axis")
+            if any(isinstance(v, (float, int)) and v <= 0 for v in self.axis_feedrates.values()):
+                raise ValueError("individual speeds must be positive")
         return self
 
 
@@ -142,6 +177,7 @@ class ReferenceTestStep(_Step):
 class HomeStep(_Step):
     op: Literal["home"]
     axes: list[str] | None = Field(default=None, description="None = home all axes.")
+    only_if_needed: bool = False
 
 
 class DwellStep(_Step):
@@ -177,6 +213,7 @@ class RequireReferenceStep(_Step):
 class HomeValveStep(_Step):
     op: Literal["home_valve"]
     name: str
+    only_if_needed: bool = False
 
 
 class WaitPressureStep(_Step):
@@ -258,6 +295,8 @@ class ProcedureParameter(BaseModel):
 
 Step = Annotated[
     MoveStep
+    | MoveForStep
+    | MoveMultiForStep
     | MoveMultiStep
     | HomeStep
     | RequireReferenceStep

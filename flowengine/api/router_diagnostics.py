@@ -92,6 +92,11 @@ async def drivers(ctx: Context):
     return await _diagnostic(ctx, "M122")
 
 
+@router.get("/diagnostics/currents", response_model=DiagnosticResponse)
+async def currents(ctx: Context):
+    return await _diagnostic(ctx, "M906")
+
+
 async def _diagnostic(ctx: AppContext, command: str) -> DiagnosticResponse:
     try:
         result = await ctx.sender.read_diagnostic(command)

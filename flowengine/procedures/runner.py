@@ -18,6 +18,8 @@ from flowengine.schemas import (
     LogStep,
     MoveMultiStep,
     MoveStep,
+    MoveForStep,
+    MoveMultiForStep,
     Procedure,
     SetParamStep,
     SetValveStep,
@@ -138,7 +140,10 @@ class ProcedureRunner:
                 await self._state.transition(State.ERRORED, detail=self._error)
                 raise ProcedureError(self._error) from None
             except Exception as exc:
-                self._sender.invalidate_positions()
+                if self._sender.reference_hold_active:
+                    await self._sender.abort()
+                else:
+                    self._sender.invalidate_positions()
                 self._error = str(exc)
                 if self._state.state != State.ERRORED:
                     await self._state.transition(
@@ -201,7 +206,10 @@ class ProcedureRunner:
             await self._state.transition(State.ERRORED, detail=self._error)
             raise
         except Exception as exc:
-            self._sender.invalidate_positions()
+            if self._sender.reference_hold_active:
+                await self._sender.abort()
+            else:
+                self._sender.invalidate_positions()
             self._error = str(exc)
             if self._state.state != State.ERRORED:
                 await self._state.transition(State.ERRORED, detail=f"{proc.name}: {exc}")
@@ -219,10 +227,19 @@ class ProcedureRunner:
             if missing:
                 raise ProcedureError("Reference these axes first: " + ", ".join(missing))
         elif isinstance(step, HomeStep):
+            targets = step.axes if step.axes is not None else [
+                a.marlin_axis for a in self._map.axes if a.kind != "peristaltic_pump"
+            ]
+            skipped = [a for a in targets if step.only_if_needed and self._sender._motion.homed.get(a, False)]
+            targets = [a for a in targets if a not in skipped]
+            if not targets:
+                self._results.append({"step_path": self._step_path, "op": step.op,
+                                      "result": {"skipped": skipped, "reason": "нули уже найдены"}})
+                return
             await self._state.transition(
-                State.HOMING, detail=f"procedure home {step.axes or 'all'}"
+                State.HOMING, detail=f"procedure home {targets}"
             )
-            result = await self._sender.home(step.axes)
+            result = await self._sender.home(targets)
             self._results.append({"step_path": self._step_path, "op": step.op, "result": result})
             await self._state.transition(State.CONNECTED_IDLE, detail="procedure home complete")
         elif isinstance(step, MoveStep):
@@ -235,13 +252,39 @@ class ProcedureRunner:
                 step.speed_units,
             )
             async with self._sender.acceleration(step.acceleration, [step.axis]):
-                if step.to is not None:
+                if step.duration_s is not None:
+                    result = await self._sender.move_multi(
+                        {step.axis: value}, relative=step.by is not None,
+                        duration_s=step.duration_s,
+                    )
+                    self._results.append({"step_path": self._step_path, "op": step.op, "result": result})
+                elif step.to is not None:
                     await self._sender.move_to(step.axis, value, speed)
                 else:
                     await self._sender.jog(step.axis, value, speed)
                 await self._sender.wait_idle()
             await self._state.transition(State.CONNECTED_IDLE, detail="procedure move complete")
+        elif isinstance(step, MoveMultiForStep):
+            await self._state.transition(State.MOVING, detail="насосы вместе по времени")
+            async with self._sender.acceleration(step.acceleration, list(step.axes)):
+                result = await self._sender.move_multi_for(step.axes, step.seconds)
+            self._results.append({"step_path": self._step_path, "op": step.op, "result": result})
+            await self._state.transition(State.CONNECTED_IDLE, detail="совместная подача насосов завершена")
+        elif isinstance(step, MoveForStep):
+            await self._state.transition(State.MOVING, detail=f"движение {step.axis} по времени")
+            async with self._sender.acceleration(step.acceleration, [step.axis]):
+                result = await self._sender.move_for(
+                    step.axis, step.direction, step.feedrate, step.seconds, step.speed_units,
+                )
+                await self._sender.wait_idle()
+            self._results.append({"step_path": self._step_path, "op": step.op, "result": result})
+            await self._state.transition(State.CONNECTED_IDLE, detail="движение по времени завершено")
         elif isinstance(step, HomeValveStep):
+            valve = self._sender.valves.config(step.name)
+            if step.only_if_needed and self._sender._motion.homed.get(valve.axis, False):
+                self._results.append({"step_path": self._step_path, "op": step.op,
+                                      "result": {"skipped": [valve.axis], "reason": "ноль уже найден"}})
+                return
             await self._state.transition(State.HOMING, detail=f"valve Home {step.name}")
             result = await self._sender.home_valve(step.name)
             self._results.append({"step_path": self._step_path, "op": step.op, "result": result})
@@ -265,9 +308,11 @@ class ProcedureRunner:
             await self._state.transition(State.MOVING, detail="coordinated movement")
             async with self._sender.acceleration(step.acceleration, list(step.axes)):
                 result = await self._sender.move_multi(
-                    step.axes, step.feedrate, step.relative, step.duration_s
+                    step.axes, step.feedrate, step.relative, step.duration_s,
+                    axis_feedrates=step.axis_feedrates,
                 )
-                await self._sender.wait_idle()
+                if step.axis_feedrates is None:
+                    await self._sender.wait_idle()
             self._results.append({"step_path": self._step_path, "op": step.op, "result": result})
             await self._events.publish({"type": "log", "level": "info", "message": str(result)})
             await self._state.transition(
@@ -289,7 +334,8 @@ class ProcedureRunner:
             await self._state.transition(State.MOVING, detail="coordinated pumps")
             async with self._sender.acceleration(step.acceleration, axes):
                 result = await self._sender.pump_multi(step.pumps)
-                await self._sender.wait_idle()
+                if not result.get("motion_complete"):
+                    await self._sender.wait_idle()
             self._results.append({"step_path": self._step_path, "op": step.op, "result": result})
             await self._state.transition(State.CONNECTED_IDLE, detail="coordinated pumps complete")
         elif isinstance(step, ReadSensorsStep):

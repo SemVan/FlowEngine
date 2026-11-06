@@ -251,6 +251,59 @@ def test_idempotency_key_dedupes(client):
     assert r1.json() == r2.json()
 
 
+def test_all_node_home_keeps_positions_excludes_u_and_can_release_all(client):
+    import re
+
+    ctx = client.app.state.ctx
+    ctx.transport._latency = 0
+    before = [valve.model_dump(mode="json") for valve in ctx.device_map.valves]
+    start = len(ctx.transport.commands)
+    response = client.post("/api/home/start", json={"axes": None})
+    assert response.status_code == 200, response.text
+    assert response.json()["axes"] == ["X", "Y", "A", "B", "C"]
+    job_id = response.json()["job_id"]
+    deadline = time.monotonic() + 4
+    while time.monotonic() < deadline:
+        status = client.get("/api/home/status", params={"job_id": job_id}).json()
+        if status["state"] in {"completed", "failed"}:
+            break
+        time.sleep(.02)
+    assert status["state"] == "completed", status
+    assert all(status["result"]["homed"][axis] for axis in "XYABC")
+    assert not status["result"]["homed"]["U"]
+    commands = ctx.transport.commands[start:]
+    moved = [re.search(r"G1 ([ABC])", command).group(1) for command in commands if re.search(r"G1 ([ABC])", command)]
+    assert list(dict.fromkeys(moved)) == list("ABC")
+    assert not any(re.search(r"(?:G28|G1).*\bU", command) for command in commands)
+    assert [valve.model_dump(mode="json") for valve in ctx.device_map.valves] == before
+    released = client.post("/api/workbench/motors", json={"enabled": False, "axes": None})
+    assert released.status_code == 200, released.text
+    assert not any(released.json()["homed"].values())
+    assert all(not ctx.transport.driver_enabled[axis] for axis in "XYABCU")
+    for page in ["/", "/procedures"]:
+        html = client.get(page)
+        assert html.status_code == 200
+        assert 'id="instrument-home-start"' in html.text
+        assert 'id="instrument-release-all"' in html.text
+
+
+def test_cancelled_valve_home_allows_release_without_reconnect(client, monkeypatch):
+    from flowengine.hardware.endstop_seek import SeekOutcome
+
+    async def cancelled_seek(*args, **kwargs):
+        return SeekOutcome(False, "cancelled", .1, 1)
+
+    monkeypatch.setattr("flowengine.hardware.valves.seek_switch", cancelled_seek)
+    response = client.post("/api/home", json={"axes": ["A", "B", "C"]})
+    assert response.status_code == 409, response.text
+    assert client.get("/api/state").json()["state"] == "connected_idle"
+    commands = client.app.state.ctx.transport.commands
+    assert not any(command.startswith(("G1 B", "G1 C")) for command in commands)
+    released = client.post("/api/workbench/motors", json={"enabled": False, "axes": None})
+    assert released.status_code == 200, released.text
+    assert not any(released.json()["homed"].values())
+
+
 def test_async_home_job_returns_immediately_and_completes(client, monkeypatch):
     import asyncio
     import time

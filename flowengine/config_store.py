@@ -40,10 +40,20 @@ def save_yaml(kind: str, name: str, model: BaseModel) -> Path:
     """Atomically replace one validated model without accepting arbitrary paths."""
     path = storage_dir(kind) / f"{validate_name(name)}.yaml"
     payload = yaml.safe_dump(
-        model.model_dump(mode="json", exclude_none=True),
+        model.model_dump(mode="json", exclude_none=kind != "profiles"),
         allow_unicode=True,
         sort_keys=False,
     )
+    if kind == "profiles" and path.is_file():
+        # запись очередного результата не должна стирать комментарии инженера в конфиге
+        try:
+            previous = load_yaml(path, type(model))
+            if previous.model_dump(exclude={"commissioning"}) == model.model_dump(exclude={"commissioning"}):
+                editable = without_commissioning(path.read_text(encoding="utf-8"))
+                history = model.model_dump(mode="json").get("commissioning", [])
+                payload = editable + yaml.safe_dump({"commissioning": history}, allow_unicode=True, sort_keys=False)
+        except ConfigError:
+            pass
     fd, temporary = tempfile.mkstemp(prefix=f".{name}.", suffix=".tmp", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
@@ -56,6 +66,17 @@ def save_yaml(kind: str, name: str, model: BaseModel) -> Path:
             os.unlink(temporary)
         raise
     return path
+
+
+def without_commissioning(text: str) -> str:
+    tree = yaml.compose(text)
+    if not isinstance(tree, yaml.MappingNode):
+        raise ConfigError("YAML root must be a mapping")
+    for key, value in tree.value:
+        if key.value == "commissioning":
+            text = text[:key.start_mark.index] + text[value.end_mark.index:]
+            break
+    return text.strip() + "\n"
 
 
 def load_yaml(path: Path, model: type[T]) -> T:

@@ -1,0 +1,31 @@
+name: demo_sample_intake
+title: 'Демо: набор воды в шприц X'
+description: 'Набор в X: кран промывки в К (КП-ПРОКАЧКА), кран сэмплера к пробе (КС-ПРОКАЧКА),
+  минус X. Нужны HOME и запас отрицательного хода. Полный цикл с подготовкой исходной
+  позиции: demo_sample_to_cuvette.'
+version: 1
+draft: false
+parameters:
+  intake_delta_mm:
+    type: number
+    description: Ход X на набор, мм; отрицательное значение
+    default: -5
+    minimum: -10.0
+    maximum: -0.5
+steps:
+- title: Проверить нули X и двух кранов
+  op: require_reference
+  axes:
+  - X
+  - A
+  - C
+- title: Соединить источник H2O с трактом пробы
+  op: set_valve
+  name: sample_valve
+  position: КС-ПРОКАЧКА
+- op: move_multi
+  axes:
+    X: 300.0
+    Y: 300.0
+  feedrate: 500.0
+  relative: false

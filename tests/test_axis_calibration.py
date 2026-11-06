@@ -154,14 +154,14 @@ async def test_physical_endstops_define_span_and_count(tmp_path, monkeypatch):
         start = await client.post("/api/axis-calibration/start", json={"token": token, "run_id": "motor", "direction": 1, "feedrate": 1200})
         assert start.status_code == 200, start.text
         await wait_stopped(ctx)
-        assert ctx.sender.manual_session["pressed"] is True
+        assert ctx.sender.manual_session["pressed"] is False
         r = await client.post("/api/axis-calibration/record", json={"token": token, "edge": "motor", "observed_contact_confirmed": True})
         assert r.status_code == 200, r.text
 
         leave = await client.post("/api/axis-calibration/start", json={"token": token, "run_id": "leave", "direction": -1, "feedrate": 1200})
         assert leave.status_code == 200, leave.text
         await wait_stopped(ctx)
-        assert ctx.sender.manual_session["pressed"] is True
+        assert ctx.sender.manual_session["pressed"] is False
         assert ctx.sender.manual_session["_run"].stop_reason == "endstop"
 
         r = await client.post("/api/axis-calibration/record", json={"token": token, "edge": "far", "observed_contact_confirmed": True})
@@ -202,14 +202,14 @@ async def test_active_endstop_allows_reverse_even_if_unreferenced_m114_drifted(t
         })
         assert start.status_code == 200, start.text
         await wait_stopped(ctx)
-        assert ctx.sender.manual_session["pressed"] is True
+        assert ctx.sender.manual_session["pressed"] is False
         labelled = await client.post("/api/axis-calibration/record", json={
             "token": token, "edge": "motor", "observed_contact_confirmed": True,
         })
         assert labelled.status_code == 200, labelled.text
 
-        # координата изменилась, но физически тот же микрик ещё нажат
-        ctx.transport._positions["Y"] += 0.4
+        # имитируем снова нажатый микрик после ручного смещения механики
+        ctx.transport._positions["Y"] = 51.4
         ctx.transport._counts["Y"] = round(ctx.transport._positions["Y"] * ctx.transport._steps_per_unit["Y"])
 
         reverse = await client.post("/api/axis-calibration/start", json={
@@ -238,11 +238,13 @@ async def test_command_into_pressed_endstop_is_nonfatal_and_reverse_still_works(
         })
         assert hit.status_code == 200, hit.text
         await wait_stopped(ctx)
-        assert ctx.sender.manual_session["pressed"] is True
+        assert ctx.sender.manual_session["pressed"] is False
         labelled = await client.post("/api/axis-calibration/record", json={
             "token": token, "edge": "motor", "observed_contact_confirmed": True,
         })
         assert labelled.status_code == 200, labelled.text
+        ctx.transport._positions["Y"] = 51.0
+        ctx.transport._counts["Y"] = round(51.0 * ctx.transport._steps_per_unit["Y"])
 
         wrong = await client.post("/api/axis-calibration/start", json={
             "token": token, "run_id": "wrong", "direction": 1, "feedrate": 1200,

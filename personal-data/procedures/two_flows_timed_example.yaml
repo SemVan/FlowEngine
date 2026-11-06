@@ -1,0 +1,43 @@
+name: two_flows_timed_example
+title: Два потока — скорости и время
+description: Оба насоса работают весь этап одним совместным ходом. Скорости приводов
+  задаются отдельно, время общее. Это мм/мин, расход в мкл ещё не измерен. Перед реальной
+  подачей проверить направления и маршрут жидкости.
+version: 1
+draft: false
+parameters:
+  speed_x:
+    type: number
+    description: Скорость X, мм/мин
+    default: 500
+    minimum: 1.0
+    maximum: 1200.0
+  speed_y:
+    type: number
+    description: Скорость Y, мм/мин
+    default: 500
+    minimum: 1.0
+    maximum: 1200.0
+  time_s:
+    type: number
+    description: Номинальное время подачи обоих насосов, с
+    default: 2
+    minimum: 0.1
+    maximum: 60.0
+steps:
+- op: require_reference
+  axes:
+  - X
+  - Y
+- title: Оба насоса весь этап, скорости отдельно
+  op: move_multi_for
+  axes:
+    X:
+      direction: 1
+      feedrate: 600.0
+      speed_units: axis/min
+    Y:
+      direction: -1
+      feedrate: 1000.0
+      speed_units: axis/min
+  seconds: 15.0

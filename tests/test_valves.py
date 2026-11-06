@@ -497,7 +497,7 @@ async def test_diagnostic_home_fault_requests_release_and_never_references(inter
 
 
 @pytest.mark.parametrize("interrupt", ["stop", "timeout", "disconnect"])
-async def test_ordinary_home_fault_also_requests_selected_motor_release(interrupt):
+async def test_ordinary_home_fault_ends_prepared_session_and_requests_motor_release(interrupt):
     sender, transport = await stack(InterruptedServiceMarlin(interrupt))
     transport.driver_enabled.update({"A": True, "B": True})
     if interrupt == "timeout":
@@ -511,7 +511,7 @@ async def test_ordinary_home_fault_also_requests_selected_motor_release(interrup
     assert not any(sender._motion.homed.values())
     assert sender.valves.states["sample_valve"].service_release == (
         "UNKNOWN" if interrupt == "disconnect" else "REQUESTED_UNCONFIRMED")
-    assert all(transport.driver_enabled[a] for a in "AB")
+    assert all(transport.driver_enabled[a] == (interrupt == "disconnect") for a in "AB")
     if interrupt != "disconnect":
         assert not transport.driver_enabled["C"]
         assert transport.commands.count("M18 C") == 1

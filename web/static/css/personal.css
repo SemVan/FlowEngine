@@ -103,6 +103,21 @@ fieldset { border:1px solid var(--border); border-radius:8px; padding:18px; marg
 .preview-issues { color:#e4c38d; }
 .empty-steps { list-style:none; color:var(--muted); }
 .service-controls { margin-top:26px; }
+.yaml-workspace { padding:16px; }
+.editor-toolbar { position:sticky; top:0; z-index:2; background:var(--panel); padding:8px 0; }
+.yaml-code { display:flex; height:65vh; min-height:350px; border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+.yaml-code pre,.yaml-code textarea { font:14px/1.6 Consolas,monospace; margin:0; padding:12px; border:0; border-radius:0; background:#14181e; white-space:pre; tab-size:2; }
+.yaml-code pre { color:var(--muted); width:55px; flex-shrink:0; text-align:right; overflow:hidden; user-select:none; }
+.yaml-code textarea { flex:1; min-width:0; resize:none; color:#e4edfa; }
+#yaml-status { white-space:pre-wrap; overflow-wrap:anywhere; }
+.serial-terminal { margin-top:20px; }
+.serial-terminal summary { cursor:pointer; font-size:17px; font-weight:600; }
+#gcode-lines { height:300px; min-height:140px; resize:vertical; overflow:auto; white-space:pre; background:#10151b; color:#acd7bb; font:12px/1.5 Consolas,monospace; padding:14px; }
+.editor-focus .topbar,.editor-focus .session-strip { display:none; }
+.editor-focus main { margin-left:0; max-width:none; padding:12px 16px 130px; }
+.editor-focus .logbar { left:0; }
+.editor-focus .page-heading { display:none; }
+.editor-focus .yaml-code { height:76vh; }
 .service-controls > summary { margin-bottom:16px; }
 @media(max-width:1080px) { .constructor-layout { grid-template-columns:1fr; } .procedure-library { border:0; border-bottom:1px solid var(--border); padding:0 0 16px; } #proc-list { display:flex; flex-wrap:wrap; gap:8px; max-height:180px; } #proc-list li { min-width:160px; flex:1 1 180px; margin:0; } }
 @media(max-width:760px) { .topbar { position:static; width:auto; padding:16px; gap:16px; } .topbar nav { display:flex; flex-wrap:wrap; gap:4px; } .topbar nav a { padding:8px; } .topbar h1 small,.topbar .status { display:none; } main { margin-left:0; padding:16px 12px 140px; } .logbar { left:0; } .panel { padding:16px; } .constructor-actions button { flex:1 1 140px; } }

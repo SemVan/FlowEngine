@@ -1,0 +1,43 @@
+name: two_flows_volume_example
+title: Два потока — объём и расход
+description: >-
+  Пример чисел для конструктора, а не настроенная доза установки.
+  У каждого насоса собственные объём и расход. Программа рассчитывает
+  время каждого и запускает их вместе. Нужны измеренные коэффициенты,
+  проверенные направления подачи и маршрут жидкости.
+draft: true
+parameters:
+  sample_volume:
+    type: number
+    description: Объём пробы, мкл
+    default: 10
+    minimum: 0.1
+  sample_flow:
+    type: number
+    description: Расход пробы, мкл/мин
+    default: 60
+    minimum: 0.1
+  sheath_volume:
+    type: number
+    description: Объём обжимающей жидкости, мкл
+    default: 100
+    minimum: 0.1
+  sheath_flow:
+    type: number
+    description: Расход обжимающей жидкости, мкл/мин
+    default: 600
+    minimum: 0.1
+steps:
+  - op: require_reference
+    axes: [X, Y]
+  - op: pump_multi
+    title: Разные объёмы и расходы, общий запуск
+    pumps:
+      sample_pump:
+        volume_ul: ${sample_volume}
+        flow_ul_min: ${sample_flow}
+        direction: dispense
+      sheath_pump:
+        volume_ul: ${sheath_volume}
+        flow_ul_min: ${sheath_flow}
+        direction: dispense

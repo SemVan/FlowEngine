@@ -35,6 +35,8 @@ from flowengine.api import (
 )
 from flowengine.api.deps import AppContext
 from flowengine.api.router_workbench import router as workbench_router
+from flowengine.api.router_session import router as session_router
+from flowengine.api.router_editor import router as editor_router
 from flowengine.api.router_commissioning import router as commissioning_router
 from flowengine.api.router_commissioning_results import router as commissioning_results_router
 from flowengine.api.router_valves import router as valves_router
@@ -185,6 +187,9 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                    passed=status["error"] is None)
         runner.recorder = persist_procedure
         app.state.reconnect_lock = asyncio.Lock()
+        from flowengine.parking import restore_parking
+        if state.state == State.CONNECTED_IDLE:
+            await restore_parking(app.state.ctx)
         forwarder = asyncio.create_task(_forward_state_to_ws(state, events, app.state.ctx))
 
         try:
@@ -197,7 +202,17 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                 valve_job["task"].cancel()
                 await asyncio.gather(valve_job["task"], return_exceptions=True)
             await shutdown_axis_calibration(app.state.ctx)
-            await transport.close()
+            from flowengine.parking import park_and_finish
+            ctx = app.state.ctx
+            if (ctx.device_map.parking.positions and ctx.state.state == State.CONNECTED_IDLE
+                    and not ctx.runner.status["running"]
+                    and all(ctx.motion.homed.get(a) for a in ctx.device_map.parking.positions)):
+                try:
+                    await park_and_finish(ctx)
+                except Exception:
+                    log.exception("автоматическая парковка при завершении не выполнена")
+            await app.state.ctx.sender.finish_reference_session()
+            await app.state.ctx.transport.close()
 
     app = FastAPI(title="FlowEngine", version="0.1.0", lifespan=lifespan)
 
@@ -210,6 +225,8 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     app.include_router(stepskip_router)
     app.include_router(ws_router)
     app.include_router(workbench_router)
+    app.include_router(session_router)
+    app.include_router(editor_router)
     app.include_router(commissioning_router)
     app.include_router(commissioning_results_router)
     app.include_router(axis_calibration_router)
@@ -285,7 +302,10 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                     else f"profile {selection.name} applied; references lost; diagnostics/commissioning only"
                 )
                 await ctx.state.transition(State.CONNECTED_IDLE, detail=detail)
-                return {"ok": True, "profile": selection.name, "references_lost": True}
+                from flowengine.parking import restore_parking
+                restored = await restore_parking(ctx)
+                return {"ok": True, "profile": selection.name, "references_lost": not restored["restored"],
+                        "parking": restored}
             except Exception as exc:
                 if new_transport is not None:
                     try:
@@ -365,9 +385,12 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                     else "reconnected; references lost; diagnostics/commissioning only"
                 )
                 await ctx.state.transition(State.CONNECTED_IDLE, detail=detail)
+                from flowengine.parking import restore_parking
+                restored = await restore_parking(ctx)
                 return {
                     "ok": True,
-                    "references_lost": True,
+                    "references_lost": not restored["restored"],
+                    "parking": restored,
                     "transport": new_transport.name,
                     "port": getattr(new_transport, "port", None),
                 }
@@ -444,6 +467,16 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         return templates.TemplateResponse(
             request=request, name="config.html", context={"title": "Config"}
         )
+
+    @app.get("/config/editor", response_class=HTMLResponse)
+    async def editor_page(request: Request):
+        return templates.TemplateResponse(request=request, name="config-editor.html",
+                                          context={"title": "Редактор YAML"})
+
+    @app.get("/terminal", response_class=HTMLResponse)
+    async def terminal_page(request: Request):
+        return templates.TemplateResponse(request=request, name="terminal.html",
+                                          context={"title": "G-code · терминал"})
 
     @app.get("/stepskip", response_class=HTMLResponse)
     async def stepskip_page(request: Request):
