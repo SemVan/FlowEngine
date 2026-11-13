@@ -175,6 +175,24 @@ class MarlinTransport(Transport):
         except TimeoutError as e:
             raise TransportTimeout(f"no response within {timeout}s") from e
 
+    async def resynchronize(self) -> None:
+        """сбрасываем нумерацию через M110 и ждём ответ ok; старые ответы удаляем"""
+        if self._closed or self._writer is None:
+            raise TransportClosed("marlin transport is not open")
+        while True:
+            try:
+                self._inbox.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        async with self._send_lock:
+            self._line_no = 1
+            self._last_sent.clear()
+            framed = frame_with_line_number(0, "M110 N0")
+            self._writer.write((framed + "\n").encode("ascii", errors="replace"))
+            await self._writer.drain()
+            log.warning("↺ serial line state reset with %s", framed)
+        await self._wait_for_reset_ok()
+
     async def resend(self, line_no: int) -> None:
         """Called by the queue layer on `Resend: N`."""
         payload = self._last_sent.get(line_no)

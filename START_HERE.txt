@@ -1,0 +1,22 @@
+FLOWENGINE - QUICK START ON WINDOWS
+
+REAL HARDWARE:
+  Double-click START_FLOWENGINE_REAL.bat
+
+SIMULATOR / MOCK:
+  Double-click START_FLOWENGINE_MOCK.bat
+
+The launchers work from any folder and do not contain a Windows username or a fixed installation path.
+Git Bash is NOT required.
+
+First launch on a new computer:
+- Python 3.11+ must be installed.
+- Internet access is needed while the launcher creates .venv and installs FlowEngine dependencies.
+- This setup happens once. Later launches use the local .venv automatically.
+
+REAL mode forces serial-port auto-discovery, so a stale Linux path such as /dev/ttyACM0 will not be used on Windows.
+
+The web UI opens at:
+  http://127.0.0.1:8765/
+
+Keep the launcher window open while FlowEngine is running.

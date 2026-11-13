@@ -41,7 +41,7 @@ pytest
 ```
 
 Without real hardware you can exercise the UI, motion API, procedures, state
-updates, diagnostics, and soft limits against a simulated Marlin controller.
+updates, diagnostics, reference-state checks, and physical-endstop calibration against a simulated Marlin controller.
 
 ## Quickstart (real hardware)
 
@@ -80,7 +80,7 @@ limits, and endstop polarity.
 | `docs/COMMISSIONING.md` | Feature limitations, firmware dependencies and bench checklist |
 | `docs/TEST_REPORT.md` | Verification performed for the developer-workbench changes |
 | `docs/ROADMAP.md` | Phases 1 / 2 / 3 and what each adds |
-| `docs/STEPSKIP.md` | Phase 3 step-skipping test design |
+| `docs/STEPSKIP.md` | Physical X/Y return-to-reference / possible step-loss check |
 
 ## Current status
 
@@ -127,3 +127,6 @@ User-specific overlays go to `$XDG_CONFIG_HOME/flowengine/` (e.g. `~/.config/flo
 ## License
 
 MIT.
+
+
+Наладка и процедуры в personal объединены с commissioning-handoff. Управление HOME и калибровка X/Y сохранены из personal. Порядок работы: [Наладка personal](docs/PERSONAL_COMMISSIONING.md).

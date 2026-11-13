@@ -1,19 +1,22 @@
 {% extends "base.html" %}
 {% block content %}
+<div class="page-heading"><h2>Мои профили</h2><p>Настройте прибор один раз. Возвращайтесь к своему профилю при каждом запуске.</p>
+<a href="/config/editor" target="_blank" rel="noopener">Открыть редактор YAML на втором мониторе ↗</a></div>
 <section class="panel">
-  <h2>Configuration profiles</h2>
-  <p>Profiles are validated before saving. Start FlowEngine with <code>--profile NAME</code> to activate a saved profile.</p>
-  <label>Name <input id="profile-name" value="my_instrument" pattern="[A-Za-z0-9_-]+"></label>
-  <button id="save-profile" type="button">Save current as…</button>
-  <button id="export-profile" type="button">Export edited profile JSON</button>
-  <button id="reload-profiles" type="button">Reload list</button>
-  <select id="profile-list"><option>loading…</option></select>
-  <button id="load-profile" type="button">View selected</button>
-  <p>Editing does not change live hardware. Save a profile, then restart with that profile. Unverified values must not enable motion.</p>
-  <button id="config-render-forms" type="button">Load forms from JSON</button>
-  <button id="config-apply-forms" type="button">Apply forms to JSON</button>
+  <div class="profile-toolbar">
+    <label class="grow">Сохранённые профили<select id="profile-list"><option>Загрузка…</option></select></label>
+    <button id="load-profile" type="button">Открыть настройки</button>
+    <button id="activate-profile" type="button">Применить выбранный</button>
+    <button id="reload-profiles" type="button" title="Обновить список">↻</button>
+  </div>
+  <p class="hint">Открытие меняет только редактор. Применение перезапускает сеанс и запоминает профиль для следующего запуска.</p>
+  <div class="profile-editbar">
+    <label>Название профиля<input id="profile-name" value="my_instrument" maxlength="64" pattern="[A-Za-z0-9_-]+" /></label>
+    <div class="actions"><button id="save-profile" type="button">Сохранить</button><button id="save-apply-profile" class="primary" type="button">Сохранить и применить</button></div>
+  </div>
+  <div id="config-result" class="save-status" role="status" aria-live="polite">Загружаем текущие настройки…</div>
   <div id="hardware-forms"></div>
-  <fieldset><legend>Pump calibration from measured liquid</legend>
+  <details><summary>Калибровка насосов по измерениям</summary><fieldset><legend>Измерения объёма</legend>
     <label>Pump <select id="calibration-pump"></select></label>
     <p>Run a known number of STEP pulses, measure collected liquid. Use repeated measurements at the same speed and load.</p>
     <div id="calibration-measurements"></div>
@@ -21,13 +24,18 @@
     <button id="calibration-calculate" type="button">Calculate (no movement)</button>
     <button id="calibration-apply" type="button" disabled>Confirm coefficient in edited profile</button>
     <pre id="calibration-result"></pre>
-  </fieldset>
+  </fieldset></details>
+  <details id="advanced-profile"><summary>Дополнительно · JSON и экспорт</summary>
+  <p class="hint">Для ручных правок структуры профиля. После редактирования JSON нажмите «Загрузить в формы».</p>
+  <button id="config-render-forms" type="button">Загрузить в формы</button>
+  <button id="config-apply-forms" type="button">Обновить JSON из форм</button>
+  <button id="export-profile" type="button">Экспорт JSON</button>
   <textarea id="config-editor" class="json-editor" spellcheck="false">loading…</textarea>
-  <pre id="config-result" aria-live="polite"></pre>
+  </details>
 </section>
 
 <section class="panel">
-  <h2>Autosampler rack configurations</h2>
+  <h2>Штатив автосамплера</h2>
   <p>The supplied 8×12 rack is a draft. Coordinates and axes must be measured before motion is enabled.</p>
   <label>Name <input id="rack-name" value="example_8x12" pattern="[A-Za-z0-9_-]+"></label>
   <button id="save-rack" type="button">Save as…</button>

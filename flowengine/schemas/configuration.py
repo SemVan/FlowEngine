@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -72,6 +74,16 @@ class RackConfig(BaseModel):
         }
 
 
+class CommissioningRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+    timestamp: datetime
+    kind: str
+    device: str
+    passed: bool
+    notes: str = Field(min_length=1)
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
 class ConfigurationProfile(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -81,3 +93,4 @@ class ConfigurationProfile(BaseModel):
     runtime: RuntimeParams
     modes: ModesConfig | None = None
     rack: RackConfig | None = None
+    commissioning: list[CommissioningRecord] = Field(default_factory=list)

@@ -12,6 +12,7 @@ from flowengine.api.deps import AppContext, get_ctx
 from flowengine.api.router_diagnostics import state as state_snapshot
 from flowengine.api.router_motion import _require_motion_enabled, _wrap_errors
 from flowengine.calibration import PumpMeasurement, calibrate_pump, reference_error
+from flowengine.errors import StateError
 from flowengine.logging_setup import audit
 from flowengine.state import State
 
@@ -54,6 +55,15 @@ class MotionRequest(Request):
     acceleration: float | None = Field(default=None, gt=0)
 
 
+class ServiceJogRequest(Request):
+    axis: str
+    channel: str = Field(pattern=r"^[A-Za-z0-9_]+$")
+    delta: float
+    feedrate: float = 30.0
+    release_motor: bool = True
+    confirmed: bool = False
+
+
 class PumpCalibration(Request):
     name: str
     measurements: list[PumpMeasurement] = Field(min_length=1)
@@ -85,7 +95,7 @@ async def capabilities(ctx: Context):
             "Configured capabilities still require bench verification.",
             "Shared-input G28 is blocked; use verified firmware-stopped seek.",
             "Position counters are not encoder feedback.",
-            "Serial Stop is not a physical emergency stop; restart after Stop.",
+            "Serial Stop is not a physical emergency stop; reconnect after physical stop. References are lost.",
             "Raw ADC and per-axis enable depend on firmware and wiring.",
         ],
     }
@@ -126,14 +136,25 @@ async def console(body: RawRequest, ctx: Context):
 @router.post("/motors")
 @_wrap_errors
 async def motors(body: MotorsRequest, ctx: Context):
-    _require_motion_enabled(ctx)
+    if ctx.runner.status["running"]:
+        raise StateError("procedure is running; motor commands are blocked")
+    # Releasing selected drivers is a safe recovery/commissioning action even
+    # while normal motion remains interlocked. Enabling them still requires the
+    # verified-motion opt-in.
+    if body.enabled:
+        _require_motion_enabled(ctx)
     ctx.state.require(State.CONNECTED_IDLE)
+    epoch = ctx.sender.reference_epoch
     await ctx.state.transition(State.MOVING, detail="motor enable/disable")
     try:
         await ctx.sender.motors(body.enabled, body.axes)
+        if epoch != ctx.sender.reference_epoch:
+            raise StateError("motor control interrupted by Stop; reconnect before continuing")
+        ctx.state.require(State.MOVING)
     except Exception:
         ctx.motion.invalidate()
-        await ctx.state.transition(State.ERRORED, detail="motor control failed")
+        if epoch == ctx.sender.reference_epoch and ctx.state.state == State.MOVING:
+            await ctx.state.transition(State.ERRORED, detail="motor control failed")
         raise
     await ctx.state.transition(State.CONNECTED_IDLE, detail="motor control complete")
     audit("motors", enabled=body.enabled, axes=body.axes)
@@ -142,6 +163,53 @@ async def motors(body: MotorsRequest, ctx: Context):
         "homed": ctx.motion.homed,
         "warning": "driver state is commanded, not electrically measured",
     }
+
+
+@router.post("/service-jog")
+@_wrap_errors
+async def service_jog(body: ServiceJogRequest, ctx: Context):
+    """One bounded unreferenced move for supervised hardware identification."""
+    if not body.confirmed:
+        raise ValueError("explicit confirmation is required for unreferenced service jog")
+    if ctx.runner.status["running"]:
+        raise ValueError("procedure is running; service jog is blocked")
+    ctx.state.require(State.CONNECTED_IDLE)
+    if ctx.sender.manual_session or ctx.sender.valves.lock.locked():
+        raise StateError("Equipment busy")
+    epoch = ctx.sender.reference_epoch
+    await ctx.state.transition(State.MOVING, detail=f"service jog {body.axis}")
+    try:
+        valve = ctx.sender.valves.for_axis(body.axis)
+        if valve:
+            if not body.release_motor:
+                raise ValueError("Valve service moves always release the motor")
+            if body.channel != ctx.device_map.shared_valve_endstop.channel:
+                raise ValueError("Use the saved shared valve input")
+            result = await ctx.sender.valves.service_move(valve.name, body.delta, body.feedrate)
+        else:
+            result = await ctx.sender.valve_commissioning.service_jog_axis(
+                body.axis, body.delta, body.feedrate, body.channel, release_motor=body.release_motor,
+            )
+            ctx.sender._reference_counts.pop(body.axis, None)
+            ctx.sender._reference_sides.pop(body.axis, None)
+            ctx.sender._expected.pop(body.axis, None)
+        if epoch != ctx.sender.reference_epoch:
+            raise StateError("Service move interrupted; reconnect before continuing")
+    except Exception:
+        if ctx.state.state == State.MOVING:
+            await ctx.state.transition(State.ERRORED if ctx.queue.faulted else State.CONNECTED_IDLE,
+                                       detail="service jog stopped; verify release and reference")
+        raise
+    motor_state = "released" if body.release_motor else "holding"
+    await ctx.state.transition(State.CONNECTED_IDLE, detail=f"service jog complete; motor {motor_state}")
+    audit(
+        "service_jog",
+        axis=body.axis,
+        delta=body.delta,
+        channel=body.channel,
+        release_motor=body.release_motor,
+    )
+    return result
 
 
 @router.post("/jog")

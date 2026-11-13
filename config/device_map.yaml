@@ -1,104 +1,146 @@
-# Device map reconstructed from the firmware (M114/M503) and the prototype
-# configuration in cytonator3000. Physical Monster8 sockets are documented in
-# docs/HARDWARE.md. Motion stays interlocked until wiring is checked.
-
-instrument_id: "cytonator-monster8"
-
+instrument_id: cytonator-monster8
 axes:
-  - marlin_axis: X
-    name: sample_syringe
-    kind: syringe_pump
-    steps_per_unit: 80.0
-    units: mm
-    travel: 146.2508767
-    home_direction: min
-    feedrate_default: 1030.0
-    feedrate_max: 1200.0
-    notes: "Prototype name: Насос сэмплера; logical X, physical DRIVER0."
-
-  - marlin_axis: Y
-    name: sheath_syringe
-    kind: syringe_pump
-    steps_per_unit: 80.0
-    units: mm
-    travel: 321.31221
-    home_direction: max
-    feedrate_default: 1200.0
-    feedrate_max: 1200.0
-    notes: "Prototype name: Насос шифа; logical Y, physical DRIVER1. Prototype requested 2000 but firmware M203 caps it at 1200 mm/min."
-
-  - marlin_axis: A
-    name: wash_valve_axis
-    kind: valve
-    steps_per_unit: 80.0
-    units: mm
-    travel: 9.42227
-    home_direction: max
-    feedrate_default: 600.0
-    feedrate_max: 1200.0
-    notes: "Logical A, physical DRIVER3 / E0 socket."
-
-  - marlin_axis: B
-    name: sheath_valve_axis
-    kind: valve
-    steps_per_unit: 80.0
-    units: mm
-    travel: 12.81382
-    home_direction: max
-    feedrate_default: 600.0
-    feedrate_max: 1200.0
-    notes: "Logical B, physical DRIVER4 / E1 socket."
-
-  - marlin_axis: C
-    name: sample_valve_axis
-    kind: valve
-    steps_per_unit: 80.0
-    units: mm
-    travel: 10.1065
-    home_direction: max
-    feedrate_default: 600.0
-    feedrate_max: 1200.0
-    notes: "Logical C, physical DRIVER5 / E2 socket."
-
-  - marlin_axis: U
-    name: wash_peristaltic
-    kind: peristaltic_pump
-    steps_per_unit: 80.0
-    units: mm
-    travel: 36000.0
-    home_direction: min
-    feedrate_default: 1200.0
-    feedrate_max: 1200.0
-    endstop_channels_shared: false
-    notes: "Logical U, physical DRIVER6 / E3 socket. Travel and volume require calibration."
-
+- marlin_axis: X
+  name: sample_syringe
+  kind: syringe_pump
+  steps_per_unit: 80.0
+  units: mm
+  travel: null
+  home_direction: min
+  feedrate_default: 1030.0
+  feedrate_max: 1200.0
+  notes: 'Prototype name: Насос сэмплера; logical X, physical DRIVER0.'
+- marlin_axis: Y
+  name: sheath_syringe
+  kind: syringe_pump
+  steps_per_unit: 80.0
+  units: mm
+  travel: null
+  home_direction: max
+  feedrate_default: 1200.0
+  feedrate_max: 1200.0
+  notes: 'Prototype name: Насос шифа; logical Y, physical DRIVER1. Prototype requested
+    2000 but firmware M203 caps it at 1200 mm/min.'
+- marlin_axis: A
+  name: wash_valve_axis
+  kind: valve
+  steps_per_unit: 80.0
+  units: mm
+  travel: 9.42227
+  home_direction: min
+  feedrate_default: 600.0
+  feedrate_max: 1200.0
+  endstop_channels_shared: false
+  notes: 'Logical A, physical DRIVER3 / E0 socket. Bench-confirmed: negative motion
+    approaches its single home switch on shared z_min.'
+- marlin_axis: B
+  name: sheath_valve_axis
+  kind: valve
+  steps_per_unit: 80.0
+  units: mm
+  travel: 12.81382
+  home_direction: min
+  feedrate_default: 600.0
+  feedrate_max: 1200.0
+  endstop_channels_shared: false
+  notes: Logical B, physical DRIVER4 / E1 socket. Negative HOME confirmed on shared
+    z_min. Travel remains provisional.
+- marlin_axis: C
+  name: sample_valve_axis
+  kind: valve
+  steps_per_unit: 80.0
+  units: mm
+  travel: 10.1065
+  home_direction: min
+  feedrate_default: 600.0
+  feedrate_max: 1200.0
+  endstop_channels_shared: false
+  notes: Logical C, physical DRIVER5 / E2 socket. Negative HOME confirmed on shared
+    z_min. Travel remains provisional; observed release position reached 11 units.
+- marlin_axis: U
+  name: wash_peristaltic
+  kind: peristaltic_pump
+  steps_per_unit: 80.0
+  units: mm
+  travel: 36000.0
+  home_direction: min
+  feedrate_default: 1200.0
+  feedrate_max: 1200.0
+  endstop_channels_shared: false
+  notes: Logical U, physical DRIVER6 / E3 socket. Travel and volume require calibration.
+shared_valve_endstop:
+  channel: z_min
 valves:
-  - name: wash_valve
-    axis: A
-    position_a: 0.0
-    position_b: -9.42227
-    home_position: A
-  - name: sheath_valve
-    axis: B
-    position_a: 0.0
-    position_b: -12.81382
-    home_position: A
-  - name: sample_valve
-    axis: C
-    position_a: 0.0
-    position_b: -10.1065
-    home_position: A
-
+- name: wash_valve
+  axis: A
+  direction_toward_home: -1
+  home_seek_speed: 600.0
+  home_latch_speed: 120.0
+  backoff: 0.5
+  pull_off: 0.5
+  calibrated: false
+  position_a: 0.0
+  position_b: 9.42227
+  home_position: A
+  calibration_notes: 'Направление подтверждено 26.10.2026: минус к общему z_min. Рабочие
+    положения не измерены.'
+  position_names:
+    КП-ПРОКАЧКА: A
+    КП-ПРОМЫВКА: B
+  home_timeout_s: null
+- name: sheath_valve
+  axis: B
+  direction_toward_home: -1
+  home_seek_speed: 600.0
+  home_latch_speed: 120.0
+  backoff: 0.5
+  pull_off: 0.5
+  calibrated: false
+  position_a: 0.0
+  position_b: 12.81382
+  home_position: A
+  calibration_notes: 'Направление подтверждено 26.10.2026: минус к общему z_min. Рабочие
+    положения не измерены.'
+  position_names:
+    КО-ПРОКАЧКА: A
+    КО-ЗАБОР: B
+  home_timeout_s: null
+- name: sample_valve
+  axis: C
+  direction_toward_home: -1
+  home_seek_speed: 600.0
+  home_latch_speed: 120.0
+  backoff: 0.5
+  pull_off: 0.5
+  calibrated: false
+  position_a: 0.0
+  position_b: 10.1065
+  home_position: A
+  calibration_notes: 'Направление подтверждено 26.10.2026: минус к общему z_min. Рабочие
+    положения не измерены.'
+  position_names:
+    КС-ПРОКАЧКА: A
+    КС-ЗАБОР: B
+  home_timeout_s: null
+endstop_inputs:
+- channel: z_min
+  axes:
+  - A
+  - B
+  - C
+  active_high: true
+  notes: One home switch per valve; three switches are wired in parallel. Home valves
+    strictly one at a time.
 pumps:
-  - name: sample_pump
-    axis: X
-    kind: syringe
-    volume_per_unit_ul: 1.0  # placeholder: calibrate before volume-based control
-  - name: sheath_pump
-    axis: Y
-    kind: syringe
-    volume_per_unit_ul: 1.0  # placeholder: calibrate before volume-based control
-  - name: wash_pump
-    axis: U
-    kind: peristaltic
-    volume_per_unit_ul: 1.0  # placeholder: calibrate before volume-based control
+- name: sample_pump
+  axis: X
+  kind: syringe
+  volume_per_unit_ul: 1.0
+- name: sheath_pump
+  axis: Y
+  kind: syringe
+  volume_per_unit_ul: 1.0
+- name: wash_pump
+  axis: U
+  kind: peristaltic
+  volume_per_unit_ul: 1.0

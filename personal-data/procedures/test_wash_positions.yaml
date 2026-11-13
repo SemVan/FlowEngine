@@ -1,0 +1,30 @@
+name: test_wash_positions
+title: Тест крана промывки A
+description: КП-ПРОКАЧКА → КП-ПРОМЫВКА → КП-ПРОКАЧКА. Нужен выполненный HOME. В конце
+  мотор A отпускается, привязка теряется. Насосы не включаются.
+version: 1
+draft: false
+parameters: {}
+steps:
+- op: require_reference
+  axes:
+  - A
+- op: set_valve
+  name: wash_valve
+  position: КП-ПРОКАЧКА
+- op: dwell
+  seconds: 2.0
+- op: set_valve
+  name: wash_valve
+  position: КП-ПРОМЫВКА
+- op: dwell
+  seconds: 2.0
+- op: set_valve
+  name: wash_valve
+  position: КП-ПРОКАЧКА
+- op: motors
+  enabled: false
+  axes:
+  - A
+- op: log
+  message: тест A завершён, мотор отпущен; перед следующим движением нужен HOME

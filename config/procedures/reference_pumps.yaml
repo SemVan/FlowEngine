@@ -1,0 +1,5 @@
+name: reference_pumps
+description: "DRAFT: require already established pump references; replace with tested HOME steps only when their inputs are verified. Never silently assert a manual zero."
+draft: true
+steps:
+  - {op: require_reference, axes: [X, Y, U]}

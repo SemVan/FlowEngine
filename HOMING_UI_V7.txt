@@ -1,0 +1,10 @@
+FlowEngine Personal — Homing / calibration UI v7
+
+- Main Control page now has a prominent Home section with Home X, Home Y, Home X+Y.
+- X/Y calibration captures a precise endstop contact as an event, then asks the operator to label it as MOTOR or AWAY.
+- Labelling no longer requires the switch to remain electrically pressed or M114 to stay near the latch coordinate.
+- A newly captured precise contact must be labelled before seeking the opposite edge.
+- Calibration UI now explicitly chooses and saves home_side: motor or far.
+- Existing Jog-row Home buttons remain available.
+- Physical Home still establishes REFERENCED; reconnect/STOP still invalidates reference while preserving calibration.
+- 110/110 tests pass in the validation environment.

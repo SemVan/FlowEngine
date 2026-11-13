@@ -4,6 +4,17 @@ from __future__ import annotations
 
 import pytest
 
+
+def use_firmware_home_axes(ctx):
+    from flowengine.api.router_axis_calibration import _apply_runtime_device_map
+    from flowengine.schemas import DeviceMap
+
+    data = ctx.device_map.model_dump(mode="json")
+    for axis in data["axes"]:
+        if axis["marlin_axis"] in {"X", "Y"}:
+            axis.update(endstop_channels_shared=False, axis_calibration=None, travel=200)
+    _apply_runtime_device_map(ctx, DeviceMap.model_validate(data))
+
 from flowengine.schemas import (
     AxisConfig,
     DeviceKind,

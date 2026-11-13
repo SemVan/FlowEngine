@@ -1,21 +1,18 @@
 name: wash
-description: "Run peristaltic wash through the tract. Valves to B."
-version: 1
+description: "DRAFT from the supplied cycle: configure the path, wash the cuvette, switch the sample valve, then wash the sampler path."
+version: 2
+draft: true
+parameters:
+  cuvette_volume_ul: {type: number, default: 100.0, minimum: 0.1, description: "Placeholder until the wash pump is calibrated."}
+  cuvette_flow_ul_min: {type: number, default: 100.0, minimum: 0.1}
+  sampler_volume_ul: {type: number, default: 100.0, minimum: 0.1, description: "Placeholder until the wash pump is calibrated."}
+  sampler_flow_ul_min: {type: number, default: 100.0, minimum: 0.1}
+  acceleration: {type: number, default: 50.0, minimum: 0.1}
 steps:
-  - op: set_valve
-    name: wash_valve
-    position: B
-  - op: set_valve
-    name: sample_valve
-    position: B
-  - op: set_valve
-    name: sheath_valve
-    position: B
-  - op: move
-    axis: U
-    by: 7200.0       # 20 rotations
-    feedrate: 3600.0
-  - op: dwell
-    seconds: 3
-  - op: log
-    message: "wash complete"
+  - {op: set_valve, name: wash_valve, position: "КП-ПРОМЫВКА"}
+  - {op: set_valve, name: sheath_valve, position: "КО-ПРОКАЧКА"}
+  - {op: set_valve, name: sample_valve, position: "КС-ПРОКАЧКА"}
+  - {op: pump, name: wash_pump, volume_ul: "${cuvette_volume_ul}", flow_ul_min: "${cuvette_flow_ul_min}", direction: dispense, acceleration: "${acceleration}"}
+  - {op: set_valve, name: sample_valve, position: "КС-ЗАБОР"}
+  - {op: pump, name: wash_pump, volume_ul: "${sampler_volume_ul}", flow_ul_min: "${sampler_flow_ul_min}", direction: dispense, acceleration: "${acceleration}"}
+  - {op: checkpoint, name: "working path washed"}

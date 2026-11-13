@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading"><h2>Редактор конфигов · YAML</h2>
+  <p>Это отдельное окно: перенесите его на второй монитор. Парковка, скорости, положения и параметры процедур редактируются здесь.</p></div>
+<section class="panel yaml-workspace">
+  <div class="constructor-actions editor-toolbar">
+    <label>Раздел <select id="yaml-kind"><option value="profiles">Профили прибора</option><option value="procedures">Процедуры</option><option value="racks">Штативы</option></select></label>
+    <label>Файл <select id="yaml-name"></select></label>
+    <button type="button" id="yaml-reload">Перечитать файл</button>
+    <button type="button" id="yaml-save">Сохранить · Ctrl+S</button>
+    <button type="button" id="yaml-apply" class="primary">Сохранить и применить</button>
+    <button type="button" id="yaml-focus">Больше места для кода</button>
+  </div>
+  <p id="yaml-status" role="status" aria-live="polite">Загружаем активный профиль…</p>
+  <div class="yaml-code"><pre id="yaml-numbers" aria-hidden="true">1</pre><textarea id="yaml-source" spellcheck="false" wrap="off" aria-label="YAML конфигурации"></textarea></div>
+  <p class="hint">Парковка задаётся в <code>device_map.parking.positions</code>, скорости возврата — в <code>device_map.parking.feedrates</code>.
+    У шприцов и кранов укажите координаты в их системе отсчёта; U при завершении просто останавливается.
+    История измерений хранится отдельно от редактируемого текста и сохраняется автоматически.
+    Изменения скоростей и парковки применяются без потери привязки. Смена геометрии требует восстановления нулей.</p>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="/static/js/config-editor.js?v=1"></script>{% endblock %}

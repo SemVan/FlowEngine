@@ -7,12 +7,14 @@ from fastapi.testclient import TestClient
 
 from flowengine.app import create_app
 from flowengine.config import AppSettings
+from tests.conftest import use_firmware_home_axes
 
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOWENGINE_CONFIG_DIR", str(tmp_path))
     with TestClient(create_app(AppSettings(mock=True, log_level="WARNING"))) as client:
+        use_firmware_home_axes(client.app.state.ctx)
         yield client
 
 

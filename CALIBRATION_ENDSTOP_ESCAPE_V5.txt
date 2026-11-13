@@ -1,0 +1,12 @@
+FlowEngine Personal — calibration endstop escape v5
+
+Fixes a false fatal fault when leaving a latched X/Y endstop during commissioning.
+
+- Physical TRIGGERED + last approach direction is now the authority for which direction is blocked.
+- M114 proximity is no longer used as an interlock on unreferenced X/Y axes.
+- Motion in the same direction that entered the active endstop is blocked non-fatally.
+- The opposite direction remains available immediately and releases the switch before seeking the other edge.
+- A blocked-direction attempt no longer calls abort(), no longer invalidates the session, and no longer requires reconnect.
+- If an endstop is active without approach context, the session remains connected and reports side-unknown instead of faulting the transport.
+
+Tests added for real-hardware-like M114 drift while an endstop remains pressed and for wrong-direction-then-reverse recovery.

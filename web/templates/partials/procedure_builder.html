@@ -1,0 +1,106 @@
+<section class="panel procedure-panel" id="procedure-builder">
+  <div class="procedure-heading">
+    <div>
+      <h2>Конструктор процедур</h2>
+      <p class="hint">Шаги выполняются сверху вниз. Совместное движение задаётся отдельным шагом.</p>
+    </div>
+    <div class="constructor-links"><a href="/valves">Настроить положения кранов →</a>
+      <a href="/commissioning">Наладка и измерения →</a>
+      <a href="/commissioning/results">Заполнить результаты наладки →</a></div>
+  </div>
+  <div class="constructor-layout">
+    <aside class="procedure-library">
+      <h3>Сохранённые процедуры</h3>
+      <button id="reload-procs" type="button">Обновить список</button>
+      <ul id="proc-list"></ul>
+      <button id="new-proc" type="button">+ Новая процедура</button>
+    </aside>
+    <div class="procedure-workspace">
+      <div class="procedure-meta">
+        <label>Название <input id="proc-title" placeholder="Например, Промывка"></label>
+        <label>Имя файла <input id="proc-name" pattern="[A-Za-z0-9_-]+" placeholder="wash"></label>
+        <label class="inline-check"><input id="proc-draft" type="checkbox" checked> Черновик</label>
+      </div>
+      <label class="procedure-description">Описание <input id="proc-description"></label>
+      <div class="constructor-actions">
+        <button id="save-proc" type="button">Сохранить</button>
+        <button id="copy-proc" type="button">Создать копию</button>
+        <button id="preview-proc" type="button">Проверить без движения</button>
+        <button id="run-proc" class="primary" type="button" aria-describedby="proc-launch-hint" disabled>Запустить процедуру</button>
+        <button id="abort-proc" type="button">Остановить процедуру</button>
+      </div>
+      <p id="proc-launch-hint" class="hint" role="status" aria-live="polite">Загружаем выбранную процедуру…</p>
+      <p class="hint">«Проверить и запустить» проверяет черновик и снимает эту отметку при подтверждении запуска.
+        Если не хватает HOME или настройки, причина появится ниже. Отдельные шаги можно проверять кнопками в списке.</p>
+      <p id="proc-status" class="phase-tag" aria-live="polite">Нет запущенной процедуры</p>
+      <h3>Порядок действий</h3>
+      <ol id="proc-steps" class="procedure-steps"></ol>
+      <fieldset class="step-builder">
+        <legend id="step-builder-title">Добавить шаг</legend>
+        <div class="step-fields">
+          <label>Название шага <input id="step-title" placeholder="Необязательно"></label>
+          <label>Действие
+            <select id="step-op">
+              <option value="set_valve">Положение крана</option>
+              <option value="home_valve">Найти ноль крана</option>
+              <option value="home">Найти ноль осей</option>
+              <option value="require_reference">Проверить наличие нулей</option>
+              <option value="move">Переместить одну ось</option>
+              <option value="move_for">Движение по времени</option>
+              <option value="move_multi">Совместное перемещение осей</option>
+              <option value="move_multi_for">Насосы вместе: скорости и время</option>
+              <option value="pump">Подать объём насосом</option>
+              <option value="pump_multi">Насосы вместе: объём и расход каждого</option>
+              <option value="dwell">Пауза</option>
+              <option value="call">Выполнить другую процедуру</option>
+              <option value="repeat">Повторить другую процедуру</option>
+              <option value="motors">Удержание / завершить сеанс (сброс нулей)</option>
+              <option value="read_sensors">Прочитать датчики</option>
+              <option value="log">Сообщение в журнал</option>
+              <option value="checkpoint">Отметка этапа</option>
+              <option value="require_setup">Требуется настройка</option>
+              <option value="seek">Сервис: поиск проверенного входа</option>
+              <option value="test_reference">Сервис: проверка возврата</option>
+            </select>
+          </label>
+        </div>
+        <div id="step-fields" class="step-fields"></div>
+        <button id="add-step" type="button">Добавить шаг</button>
+        <button id="cancel-step-edit" type="button" hidden>Отменить изменение</button>
+      </fieldset>
+      <details id="run-parameters" open>
+        <summary>Параметры запуска</summary>
+        <p class="hint">Поля подставляются вместо ссылок вроде <code>${travel}</code> в шагах.</p>
+        <div id="proc-parameter-fields" class="parameter-fields"></div>
+        <datalist id="numeric-parameters"></datalist>
+        <button id="save-run-defaults" type="button">Сохранить параметры как значения по умолчанию</button>
+        <details>
+          <summary>Добавить или изменить параметр</summary>
+          <p class="hint">Например: имя speed, значение 120. В поле скорости шага выберите или введите ${speed}.</p>
+          <div class="parameter-fields">
+            <label>Имя параметра <input id="parameter-name" placeholder="speed" pattern="[A-Za-z_][A-Za-z0-9_]*"></label>
+            <label>Подпись и единицы <input id="parameter-description" placeholder="Скорость X, мм/мин"></label>
+            <label>Тип <select id="parameter-type"><option value="number">Число</option><option value="integer">Целое число</option><option value="string">Текст</option><option value="boolean">Да / нет</option></select></label>
+            <label>Значение по умолчанию <input id="parameter-default" placeholder="120"></label>
+            <label>Минимум (необязательно) <input id="parameter-min" type="number" step="any"></label>
+            <label>Максимум (необязательно) <input id="parameter-max" type="number" step="any"></label>
+          </div>
+          <button id="add-parameter" type="button">Добавить / обновить параметр</button>
+        </details>
+        <details>
+          <summary>Значения в JSON</summary>
+          <textarea id="proc-parameters" class="json-editor compact" spellcheck="false">{}</textarea>
+        </details>
+      </details>
+      <div id="proc-feedback" class="procedure-feedback" aria-live="polite"></div>
+      <details class="advanced-editor">
+        <summary>Для разработчика: JSON и экспорт</summary>
+        <p class="hint">Здесь можно определить параметры и изменить полный текст процедуры.</p>
+        <textarea id="proc-detail" class="json-editor" spellcheck="false"></textarea>
+        <button id="apply-json" type="button">Применить JSON</button>
+        <button id="export-proc" type="button">Скачать JSON</button>
+        <pre id="proc-result"></pre>
+      </details>
+    </div>
+  </div>
+</section>

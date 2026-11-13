@@ -1,0 +1,8 @@
+Calibration release v4
+
+- A held move away from an already-triggered, known endstop no longer stops at OPEN.
+  It continues in the same hold toward the opposite physical endstop.
+- Automatic endstop stop retires the browser-side hold immediately, so the opposite
+  direction is available as soon as the carriage is parked on the switch.
+- Same-direction motion into the active endstop remains blocked.
+- No software safe-range was added back.

@@ -1,0 +1,58 @@
+name: demo_prepare_paths
+title: 'Демо: подготовка к забору и прокачке'
+description: Последовательный HOME трёх кранов, установка маршрута забора, пауза,
+  переход в прокачку. Насосы не включаются. В конце удержание и найденные нули сохраняются.
+version: 1
+draft: false
+parameters:
+  pause_s:
+    type: number
+    description: Пауза между режимами, с
+    default: 3
+    minimum: 0.5
+    maximum: 30.0
+steps:
+- op: log
+  message: цикл завершён; рабочие позиции и нули сохранены для следующего запуска
+- title: Найти ноль крана промывки
+  op: home_valve
+  name: wash_valve
+  only_if_needed: true
+- title: 'Промывка: маршрут прокачки'
+  op: set_valve
+  name: wash_valve
+  position: КП-ПРОКАЧКА
+- title: Найти ноль крана шифа
+  op: home_valve
+  name: sheath_valve
+  only_if_needed: true
+- title: 'Шиф: маршрут забора'
+  op: set_valve
+  name: sheath_valve
+  position: КО-ЗАБОР
+- title: Найти ноль крана сэмплера
+  op: home_valve
+  name: sample_valve
+  only_if_needed: true
+- title: 'Сэмплер: маршрут забора'
+  op: set_valve
+  name: sample_valve
+  position: КС-ЗАБОР
+- op: log
+  message: цикл завершён; рабочие позиции и нули сохранены для следующего запуска
+- title: Пауза для наблюдения
+  op: dwell
+  seconds: ${pause_s}
+- title: 'Шиф: перейти в прокачку'
+  op: set_valve
+  name: sheath_valve
+  position: КО-ПРОКАЧКА
+- title: 'Сэмплер: перейти в прокачку'
+  op: set_valve
+  name: sample_valve
+  position: КС-ПРОКАЧКА
+- title: Показать положение прокачки
+  op: dwell
+  seconds: ${pause_s}
+- op: log
+  message: цикл завершён; рабочие позиции и нули сохранены для следующего запуска

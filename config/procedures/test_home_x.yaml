@@ -1,0 +1,17 @@
+name: test_home_x
+title: Пробный HOME X
+description: Штатный HOME X использует сохранённую калибровку personal. После паузы
+  мотор отпускается. Сначала проверить отдельный шаг под наблюдением.
+version: 1
+draft: true
+parameters: {}
+steps:
+- op: home
+  axes:
+  - X
+- op: dwell
+  seconds: 1.0
+- op: motors
+  enabled: false
+  axes:
+  - X

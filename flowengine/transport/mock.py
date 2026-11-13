@@ -42,6 +42,8 @@ class MockTransport(Transport):
         disconnect_after: int | None = None,
         probe_strokes: dict[str, float] | None = None,
         probe_channel: str = "probe",
+        valve_homes: dict[str, int] | None = None,
+        valve_channel: str = "z_min",
     ) -> None:
         self._latency = latency_s
         self._error_every_n = error_every_n
@@ -52,6 +54,7 @@ class MockTransport(Transport):
         self._sent_count = 0
         self._positions: dict[str, float] = defaultdict(float)
         self._homed: dict[str, bool] = {}
+        self._home_released: set[str] = set()
         self._absolute = True
         self._injected_errors_remaining = 0
         self.commands: list[str] = []
@@ -62,9 +65,17 @@ class MockTransport(Transport):
         self.step_loss_direction: int | None = None
         self.probe_stuck: bool | None = None
         self.driver_enabled: dict[str, bool] = {}
+        self.stepper_timeout_s = 120.0
         self._steps_per_unit: dict[str, float] = defaultdict(lambda: 80.0)
         self._counts: dict[str, int] = defaultdict(int)
         self._acceleration = {"P": 3000.0, "R": 3000.0, "T": 3000.0}
+        self.valve_homes = valve_homes or {}
+        self.valve_channel = valve_channel
+        self.valve_mechanical = {a: -direction * 2.0 for a, direction in self.valve_homes.items()}
+        self.valve_endstop_stuck: bool | None = None
+        self.soft_endstops = True
+        for axis in self.valve_homes:
+            self._positions[axis] = 0.0
 
     async def open(self) -> None:
         self._closed = False
@@ -150,14 +161,33 @@ class MockTransport(Transport):
             await self._inbox.put("ok")
             return
         if p.startswith("M119"):
+            valve_pressed = self.valve_endstop_stuck if self.valve_endstop_stuck is not None else any(
+                self.valve_mechanical[a] * direction >= 0 for a, direction in self.valve_homes.items())
             for axis in ("x", "y", "z"):
+                pressed = self._homed.get(axis.upper(), False)
+                if axis in {"x", "y"}:
+                    pos = self._positions.get(axis.upper(), 0)
+                    pressed = pressed and axis.upper() not in self._home_released and (pos <= 0 or pos >= 200)
+                if self.valve_homes and f"{axis}_min" == self.valve_channel:
+                    pressed = valve_pressed
                 await self._inbox.put(
-                    f"{axis}_min: {'TRIGGERED' if self._homed.get(axis.upper(), False) else 'open'}"
+                    f"{axis}_min: {'TRIGGERED' if pressed else 'open'}"
                 )
+            if self.valve_homes and self.valve_channel not in {"x_min", "y_min", "z_min"}:
+                await self._inbox.put(f"{self.valve_channel}: {'TRIGGERED' if valve_pressed else 'open'}")
             if self.probe_strokes:
                 triggered = self.probe_stuck if self.probe_stuck is not None else any(
                     self.mechanical[a] <= 0 or self.mechanical[a] >= stroke for a,stroke in self.probe_strokes.items())
                 await self._inbox.put(f"{self.probe_channel}: {'TRIGGERED' if triggered else 'open'}")
+            await self._inbox.put("ok")
+            return
+        if p == "M211":
+            await self._inbox.put(f"M211 S{int(self.soft_endstops)}")
+            await self._inbox.put("Min: X0.00 Y0.00 Z0.00 Max: X200.00 Y200.00 Z200.00")
+            await self._inbox.put("ok")
+            return
+        if p.startswith("M211 S"):
+            self.soft_endstops = "S1" in p
             await self._inbox.put("ok")
             return
         if p.startswith("M114"):
@@ -183,6 +213,11 @@ class MockTransport(Transport):
             await self._inbox.put("ok")
             return
         if p.startswith(("M17", "M18", "M84")):
+            timeout = re.search(r"\bS(\d+(?:\.\d+)?)", p)
+            if timeout and p.startswith(("M18", "M84")):
+                self.stepper_timeout_s = float(timeout.group(1))
+                await self._inbox.put("ok")
+                return
             axes = _HOME_AXIS_TOKEN.findall(p[3:]) or list(self._positions) or ["X", "Y", "Z"]
             for a in axes:
                 self.driver_enabled[a] = p.startswith("M17")
@@ -242,21 +277,27 @@ class MockTransport(Transport):
                 or ["X", "Y", "Z"]
             )
             for axis in tokens:
+                self.driver_enabled[axis] = True
                 self._positions[axis] = 0.0
                 self._homed[axis] = True
+                self._home_released.add(axis)
             # Simulate some homing latency (above the per-line latency).
             await asyncio.sleep(self._latency * 4)
             await self._inbox.put("ok")
             return
         if p.startswith(("G0", "G1")):
             for axis, val in _AXIS_TOKEN.findall(payload):
+                self.driver_enabled[axis] = True
                 v = float(val)
+                self._home_released.discard(axis)
                 old = self._positions.get(axis, 0.0)
                 if self._absolute:
                     self._positions[axis] = v
                 else:
                     self._positions[axis] = self._positions.get(axis, 0.0) + v
                 delta = self._positions[axis]-old
+                if axis in self.valve_mechanical:
+                    self.valve_mechanical[axis] += delta
                 self._counts[axis] += round(delta*self._steps_per_unit[axis])
                 if axis in self.mechanical:
                     loss = self.step_loss_fraction if self.step_loss_direction is None or (delta > 0) == (self.step_loss_direction > 0) else 0

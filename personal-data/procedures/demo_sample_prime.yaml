@@ -1,0 +1,65 @@
+name: demo_sample_prime
+title: 'Демо: короткая прокачка сэмплера'
+description: 'Прежняя заготовка подачи +X. Уточнён маршрут набора: H2O → C-ПРОКАЧКА
+  → A-ЗАБОР → шприц X. Подача в слив не подтверждена.'
+version: 1
+draft: false
+parameters:
+  stroke_mm:
+    type: number
+    description: Ход поршня X на подачу, мм
+    default: 5
+    minimum: 0.5
+    maximum: 10.0
+  speed_mm_min:
+    type: number
+    description: Скорость поршня X, мм/мин
+    default: 120
+    minimum: 30.0
+    maximum: 300.0
+  pause_s:
+    type: number
+    description: Пауза после подачи, с
+    default: 2
+    minimum: 0.5
+    maximum: 10.0
+steps:
+- title: Проверить нули X и кранов
+  op: require_reference
+  axes:
+  - X
+  - A
+  - B
+  - C
+- title: Кран промывки в прокачку
+  op: set_valve
+  name: wash_valve
+  position: КП-ПРОКАЧКА
+- title: Кран шифа в прокачку
+  op: set_valve
+  name: sheath_valve
+  position: КО-ПРОКАЧКА
+- title: Кран сэмплера в прокачку
+  op: set_valve
+  name: sample_valve
+  position: КС-ПРОКАЧКА
+- title: Подать жидкость ходом поршня X
+  op: move
+  axis: X
+  by: ${stroke_mm}
+  feedrate: ${speed_mm_min}
+  units: axis
+  speed_units: axis/min
+- title: Пауза после подачи
+  op: dwell
+  seconds: ${pause_s}
+- title: Снять удержание задействованных моторов
+  op: motors
+  enabled: false
+  axes:
+  - X
+  - A
+  - B
+  - C
+- op: log
+  message: короткая прокачка завершена; объём не измерялся, перед повтором нужен HOME

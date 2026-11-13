@@ -110,7 +110,7 @@ Hardware caveats: [COMMISSIONING.md](COMMISSIONING.md).
   feedrate: 400.0   # optional; defaults to axis.feedrate_default
 ```
 
-Soft limits are enforced before the G-code is sent.
+Normal moves require a valid axis reference. X/Y physical boundaries are provided by the calibrated endstops, not by a host-side guessed range.
 
 ### `move_multi` (coordinated movement)
 
@@ -159,7 +159,11 @@ Reserved operation. It can be stored and previewed, but the runner currently ref
   position: A          # or B
 ```
 
-Semantic wrapper around `move` for two-position valves.
+Calls the shared-endstop ValveSubsystem and waits for supervised completion.
+Requires commissioned A/B and a current Home reference. Unexpected endstop
+activation stops the procedure. Use `op: home_valve` with the same `name` to
+reference one valve first. Legacy two-boundary `calibrate_valve` is blocked for
+valve motors. See [VALVES.md](VALVES.md) for single-switch commissioning.
 
 ### `wait_pressure`
 
@@ -218,7 +222,7 @@ Loading is two-step:
 1. **Parse:** YAML → pydantic discriminated union on `op`. Unknown ops, missing fields, or wrong types fail here.
 2. **Lint:** check that referenced axes / valves / pumps exist in the active `device_map.yaml`.
 
-The Procedures page lists shipped procedures and saved user procedures. Files that fail schema validation are shown with the reason. Controller-dependent checks still occur when a step is executed: for example an unknown valve, an unhomed axis, or a soft-limit violation is refused.
+The Procedures page lists shipped procedures and saved user procedures. Files that fail schema validation are shown with the reason. Controller-dependent checks still occur when a step is executed: for example an unknown valve or an unreferenced axis is refused.
 
 You can also lint from the CLI:
 

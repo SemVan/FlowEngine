@@ -1,0 +1,15 @@
+<details class="panel serial-terminal" id="gcode-panel">
+  <summary>G-code · отправлено плате и получено в ответ</summary>
+  <div class="constructor-actions">
+    <label>Показывать <select id="gcode-filter"><option value="all">TX + RX</option><option value="TX">Только отправленные TX</option><option value="motion">Только движение</option></select></label>
+    <label><input type="checkbox" id="gcode-follow" checked> Прокручивать вниз</label>
+    <button type="button" id="gcode-pause">Пауза просмотра</button>
+    <button type="button" id="gcode-clear">Очистить экран</button>
+    <button type="button" id="gcode-export">Скачать журнал</button>
+    <a href="/terminal" target="_blank" rel="noopener">Отдельное окно ↗</a>
+  </div>
+  <p class="hint" id="gcode-status" role="status">Загружаем журнал…</p>
+  <pre id="gcode-lines" tabindex="0" aria-label="Журнал TX и RX"></pre>
+  <p class="hint">Чтение журнала не отправляет команды. TX — команда, переданная в транспорт; RX — ответ платы.
+    Ответ ok означает приём команды. Координаты платы не являются обратной связью от механики.</p>
+</details>

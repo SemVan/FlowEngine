@@ -1,0 +1,46 @@
+FlowEngine Personal — Automatic X/Y Calibration v9
+===================================================
+
+Purpose
+-------
+Automatic calibration now reuses the physical direction mapping already verified
+once in the manual X/Y commissioning screen. No operator edge labelling is needed
+for routine recalibration.
+
+Sequence for each selected axis
+-------------------------------
+1. Require the shared endstop input to be OPEN at start.
+2. Use the saved +/- -> toward motor / away from motor mapping.
+3. Fast continuous seek to the motor-side physical switch.
+4. Release the switch, back off, then perform a slow precise latch.
+5. Capture M114 position and Marlin Count (when available).
+6. Leave that switch and traverse to the far physical switch.
+7. Release/back off and perform the same slow precise latch.
+8. Recompute physical travel and travel_steps from the two precise contacts.
+9. Atomically update the active personal profile.
+10. Apply the new calibration to the running process immediately.
+11. Run physical Home using the selected home_side and mark the axis REFERENCED.
+
+UI
+--
+The X/Y calibration page now contains:
+- Auto Calibrate X
+- Auto Calibrate Y
+- Auto Calibrate X + Y
+- Stop auto calibration
+- Live phase/status text
+
+Safety / invariants
+-------------------
+- There is still no legacy coordinate safe-range for X/Y.
+- Physical endstops remain the geometric source of truth.
+- Auto calibration will not guess a side if the shared switch is already pressed
+  at startup. Release the switch with the manual commissioning controls first.
+- Normal physical endstop hits use the continuous seek/M119/M410 primitive and do
+  not intentionally fault the serial session.
+- Emergency STOP/reconnect semantics remain unchanged.
+
+Persistence
+-----------
+Auto calibration updates only the currently active personal profile. The factory
+"default" profile is never overwritten.

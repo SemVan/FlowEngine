@@ -86,7 +86,31 @@ export const api = {
   home(axes) {
     return request("/api/home", { method: "POST", body: JSON.stringify({ axes }) });
   },
+  homeStart(axes) {
+    return request("/api/home/start", { method: "POST", body: JSON.stringify({ axes }) });
+  },
+  homeStatus(jobId) {
+    return request(`/api/home/status?job_id=${encodeURIComponent(jobId)}`);
+  },
+  homeCancel() { return request("/api/home/cancel", { method: "POST" }); },
+  stepCheckStart(axes, toleranceSteps) {
+    return request("/api/stepskip/start", {
+      method: "POST", body: JSON.stringify({ axes, tolerance_steps: toleranceSteps }),
+    });
+  },
+  stepCheckStatus(jobId) {
+    return request(`/api/stepskip/status?job_id=${encodeURIComponent(jobId)}`);
+  },
+  stepCheckCancel() { return request("/api/stepskip/cancel", { method: "POST" }); },
   stop() { return request("/api/stop", { method: "POST" }); },
+  valves() { return request("/api/valves"); },
+  valveEndstop(channel) { return request(`/api/valves/endstop/${encodeURIComponent(channel)}`); },
+  valveServiceJog(body) {
+    return request("/api/valves/service-jog", { method: "POST", body: JSON.stringify(body) });
+  },
+  valveHome(body) {
+    return request("/api/valves/home", { method: "POST", body: JSON.stringify(body) });
+  },
   procedures() { return request("/api/procedures"); },
   procedure(name) { return request(`/api/procedures/${encodeURIComponent(name)}`); },
   saveProcedure(name, procedure) {

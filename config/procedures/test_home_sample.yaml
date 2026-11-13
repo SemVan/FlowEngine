@@ -1,0 +1,14 @@
+name: test_home_sample
+title: Пробный HOME крана сэмплера
+description: HOME C использует направление и параметры из активного профиля. После
+  HOME удержание снимается и привязка теряется.
+version: 1
+draft: true
+parameters: {}
+steps:
+- op: home_valve
+  name: sample_valve
+- op: motors
+  enabled: false
+  axes:
+  - C

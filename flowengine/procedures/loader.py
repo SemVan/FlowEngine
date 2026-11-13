@@ -14,8 +14,11 @@ from flowengine.loaders import load_procedure
 from flowengine.schemas import (
     DeviceMap,
     HomeStep,
+    HomeValveStep,
     MoveMultiStep,
     MoveStep,
+    MoveForStep,
+    MoveMultiForStep,
     Procedure,
     SetValveStep,
 )
@@ -27,10 +30,10 @@ def lint(proc: Procedure, dm: DeviceMap) -> list[str]:
     known_axes = {a.marlin_axis for a in dm.axes}
     known_valves = {v.name for v in dm.valves}
     for i, step in enumerate(proc.steps):
-        if isinstance(step, MoveStep):
+        if isinstance(step, (MoveStep, MoveForStep)):
             if step.axis not in known_axes:
                 issues.append(f"step {i}: unknown axis {step.axis!r}")
-        elif isinstance(step, MoveMultiStep):
+        elif isinstance(step, (MoveMultiStep, MoveMultiForStep)):
             for axis in step.axes:
                 if axis not in known_axes:
                     issues.append(f"step {i}: unknown axis {axis!r}")
@@ -42,6 +45,17 @@ def lint(proc: Procedure, dm: DeviceMap) -> list[str]:
         elif isinstance(step, SetValveStep):
             if step.name not in known_valves:
                 issues.append(f"step {i}: unknown valve {step.name!r}")
+            else:
+                valve = next(v for v in dm.valves if v.name == step.name)
+                try:
+                    valve.position(step.position)
+                except ValueError as exc:
+                    issues.append(f"step {i}: {exc}")
+        elif isinstance(step, HomeValveStep):
+            if step.name not in known_valves:
+                issues.append(f"step {i}: unknown valve {step.name!r}")
+            elif not dm.shared_valve_endstop.channel:
+                issues.append(f"step {i}: shared valve input is not configured")
     return issues
 
 

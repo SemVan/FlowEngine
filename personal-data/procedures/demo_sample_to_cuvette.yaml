@@ -1,0 +1,87 @@
+name: demo_sample_to_cuvette
+title: 'Демо: набор воды и подача в кювету'
+description: 'После общей подготовки HOME. Кран промывки остаётся в К (КП-ПРОКАЧКА).
+  Сначала X приходит в позицию 10 мм с открытым выходом в резервуар-кювету: сразу
+  после HOME это предварительная подача около 8 мм. Затем кран сэмплера переключается
+  к пробе H2O, X идёт с 10 до 5 мм и набирает воду; кран переключается к кювете, X
+  возвращается с 5 до 10 мм и подаёт воду. В конце удержание и нули сохраняются. Это
+  ход поршня, объём не измерен.'
+version: 1
+draft: false
+parameters:
+  delivery_position_mm:
+    type: number
+    description: Позиция X после подачи, мм
+    default: 10
+    minimum: 10.0
+    maximum: 20.0
+  intake_position_mm:
+    type: number
+    description: Позиция X после набора, мм
+    default: 5
+    minimum: 2.5
+    maximum: 9.5
+  speed_mm_min:
+    type: number
+    description: Скорость поршня X, мм/мин
+    default: 120
+    minimum: 30.0
+    maximum: 300.0
+  pause_s:
+    type: number
+    description: Пауза после набора и подачи, с
+    default: 2
+    minimum: 0.5
+    maximum: 10.0
+steps:
+- title: Проверить нули X и кранов A/C
+  op: require_reference
+  axes:
+  - X
+  - A
+  - C
+- title: 'Промывка в К: соединить X с краном сэмплера'
+  op: set_valve
+  name: wash_valve
+  position: КП-ПРОКАЧКА
+- title: 'Сэмплер: открыть путь к резервуару-кювете'
+  op: set_valve
+  name: sample_valve
+  position: КС-ЗАБОР
+- title: 'Подготовительная подача: установить X на 10 мм'
+  op: move
+  axis: X
+  to: ${delivery_position_mm}
+  feedrate: ${speed_mm_min}
+  units: axis
+  speed_units: axis/min
+- title: 'Сэмплер: открыть путь к пробе H2O'
+  op: set_valve
+  name: sample_valve
+  position: КС-ПРОКАЧКА
+- title: 'Набрать воду: X от 10 до 5 мм'
+  op: move
+  axis: X
+  to: ${intake_position_mm}
+  feedrate: ${speed_mm_min}
+  units: axis
+  speed_units: axis/min
+- title: Пауза после набора
+  op: dwell
+  seconds: ${pause_s}
+- title: 'Сэмплер: переключить выход на кювету'
+  op: set_valve
+  name: sample_valve
+  position: КС-ЗАБОР
+- title: 'Подать воду в кювету: X от 5 до 10 мм'
+  op: move
+  axis: X
+  to: ${delivery_position_mm}
+  feedrate: ${speed_mm_min}
+  units: axis
+  speed_units: axis/min
+- title: Пауза после подачи
+  op: dwell
+  seconds: ${pause_s}
+- op: log
+  message: цикл завершён; рабочие позиции и нули сохранены для следующего запуска

@@ -1,0 +1,14 @@
+name: home_valves_shared
+description: HOME использует сохранённые направления и параметры personal. Рабочие
+  положения и маршруты требуют проверки.
+version: 1
+draft: true
+steps:
+- op: home_valve
+  name: wash_valve
+- op: home_valve
+  name: sheath_valve
+- op: home_valve
+  name: sample_valve
+- op: log
+  message: all three valves referenced sequentially on z_min

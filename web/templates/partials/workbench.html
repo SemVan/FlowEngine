@@ -2,7 +2,7 @@
   <h2>Developer workbench</h2>
   <pre id="connection-view">Loading connection…</pre>
   <details><summary>Capabilities and limitations</summary><pre id="capabilities-view"></pre></details>
-  <p>Stop is a serial request, not an emergency stop. After Stop, restart and re-home. Releasing motors invalidates their reference position.</p>
+  <p>После физической остановки нажмите «Переподключить». Окно и выбранный профиль сохранятся; прерванные команды не повторятся. Опорные позиции после Stop недействительны. M410 не заменяет аппаратную остановку.</p>
   <h3>Motion in physical units</h3>
   <label>Axis <select id="wb-axis">{% for ax in device_map.axes %}<option>{{ ax.marlin_axis }}</option>{% endfor %}</select></label>
   <label>Relative displacement <input id="wb-by" type="number" step="any" value="1"></label>

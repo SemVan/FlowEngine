@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from flowengine.app import create_app
 from flowengine.config import AppSettings
+from tests.conftest import use_firmware_home_axes
 
 
 @pytest.fixture
@@ -17,6 +18,11 @@ def client(monkeypatch, tmp_path) -> TestClient:
     settings = AppSettings(mock=True, log_level="WARNING")
     app = create_app(settings)
     with TestClient(app) as c:
+        use_firmware_home_axes(app.state.ctx)
+        device = c.get("/api/config").json()["device_map"]
+        configured = c.put("/api/valves/config", json={"valves": device["valves"],
+                            "shared_valve_endstop": {"channel": "z_min"}})
+        assert configured.status_code == 200, configured.text
         yield c
 
 
@@ -44,24 +50,36 @@ def test_home_all_and_jog(client):
     assert body["positions"]["X"] == pytest.approx(1.0, abs=0.01)
 
 
-def test_jog_before_home_rejected(client):
-    # Re-create with fresh state by restarting? Use the test we have: jog should fail soft-limit.
-    # State on existing fixture is post-home so we can't easily test pre-home here.
-    # Instead, jog an axis past its travel limit.
-    client.post("/api/home", json={"axes": None})
+def test_normal_motion_requires_reference(client):
+    assert client.post("/api/stop").status_code == 200
+    assert client.post("/api/reconnect").status_code == 200
     r = client.post(
         "/api/jog",
-        json={"axis": "X", "delta": 99999.0, "feedrate": 100.0},
-        headers={"Idempotency-Key": "soft"},
+        json={"axis": "X", "delta": 1.0, "feedrate": 100.0},
+        headers={"Idempotency-Key": "unreferenced"},
     )
-    assert r.status_code == 400
-    assert "soft-limit" in r.text
+    assert r.status_code in {400, 409}
+    assert "refer" in r.text.lower() or "state" in r.text.lower()
 
 
 def test_stop_endpoint(client):
     client.post("/api/home", json={"axes": None})
     r = client.post("/api/stop")
     assert r.status_code == 200
+
+
+def test_core_reconnect_after_stop_without_desktop_wrapper(client):
+    client.post("/api/home", json={"axes": None})
+    assert client.post("/api/stop").status_code == 200
+    assert client.get("/api/state").json()["state"] == "errored"
+
+    r = client.post("/api/reconnect")
+    assert r.status_code == 200, r.text
+    assert r.json()["references_lost"] is True
+    state = client.get("/api/state").json()
+    assert state["state"] == "connected_idle"
+    assert not any(state["homed"].values())
+    assert client.get("/api/diagnostics/firmware").status_code == 200
 
 
 def test_config_endpoint(client):
@@ -208,22 +226,19 @@ def test_profiles_and_racks_can_be_saved(client):
 
 
 def test_procedure_runs_end_to_end(client):
-    response = client.post("/api/procedures/home_all/run")
+    client.put("/api/procedures/smoke_home", json={"name": "smoke_home", "steps": [
+        {"op": "home", "axes": ["X"]}, {"op": "log", "message": "done"}]})
+    response = client.post("/api/procedures/smoke_home/run")
     assert response.status_code == 200, response.text
-    deadline = time.monotonic() + 2
+    deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         status = client.get("/api/procedures/status").json()
         if not status["running"]:
             break
         time.sleep(0.01)
-    assert status == {
-        "running": False,
-        "name": "home_all",
-        "step": 2,
-        "step_path": "home_all step 2",
-        "error": None,
-        "results": [],
-    }
+    assert not status["running"] and status["error"] is None
+    assert status["name"] == "smoke_home" and status["step"] == 2
+    assert status["results"][0]["result"]["X"]["strategy"] == "g28"
 
 
 def test_idempotency_key_dedupes(client):
@@ -234,3 +249,89 @@ def test_idempotency_key_dedupes(client):
     assert r1.status_code == r2.status_code == 200
     # Same response → second call did not actually move (cache hit).
     assert r1.json() == r2.json()
+
+
+def test_all_node_home_keeps_positions_excludes_u_and_can_release_all(client):
+    import re
+
+    ctx = client.app.state.ctx
+    ctx.transport._latency = 0
+    before = [valve.model_dump(mode="json") for valve in ctx.device_map.valves]
+    start = len(ctx.transport.commands)
+    response = client.post("/api/home/start", json={"axes": None})
+    assert response.status_code == 200, response.text
+    assert response.json()["axes"] == ["X", "Y", "A", "B", "C"]
+    job_id = response.json()["job_id"]
+    deadline = time.monotonic() + 4
+    while time.monotonic() < deadline:
+        status = client.get("/api/home/status", params={"job_id": job_id}).json()
+        if status["state"] in {"completed", "failed"}:
+            break
+        time.sleep(.02)
+    assert status["state"] == "completed", status
+    assert all(status["result"]["homed"][axis] for axis in "XYABC")
+    assert not status["result"]["homed"]["U"]
+    commands = ctx.transport.commands[start:]
+    moved = [re.search(r"G1 ([ABC])", command).group(1) for command in commands if re.search(r"G1 ([ABC])", command)]
+    assert list(dict.fromkeys(moved)) == list("ABC")
+    assert not any(re.search(r"(?:G28|G1).*\bU", command) for command in commands)
+    assert [valve.model_dump(mode="json") for valve in ctx.device_map.valves] == before
+    released = client.post("/api/workbench/motors", json={"enabled": False, "axes": None})
+    assert released.status_code == 200, released.text
+    assert not any(released.json()["homed"].values())
+    assert all(not ctx.transport.driver_enabled[axis] for axis in "XYABCU")
+    for page in ["/", "/procedures"]:
+        html = client.get(page)
+        assert html.status_code == 200
+        assert 'id="instrument-home-start"' in html.text
+        assert 'id="instrument-release-all"' in html.text
+
+
+def test_cancelled_valve_home_allows_release_without_reconnect(client, monkeypatch):
+    from flowengine.hardware.endstop_seek import SeekOutcome
+
+    async def cancelled_seek(*args, **kwargs):
+        return SeekOutcome(False, "cancelled", .1, 1)
+
+    monkeypatch.setattr("flowengine.hardware.valves.seek_switch", cancelled_seek)
+    response = client.post("/api/home", json={"axes": ["A", "B", "C"]})
+    assert response.status_code == 409, response.text
+    assert client.get("/api/state").json()["state"] == "connected_idle"
+    commands = client.app.state.ctx.transport.commands
+    assert not any(command.startswith(("G1 B", "G1 C")) for command in commands)
+    released = client.post("/api/workbench/motors", json={"enabled": False, "axes": None})
+    assert released.status_code == 200, released.text
+    assert not any(released.json()["homed"].values())
+
+
+def test_async_home_job_returns_immediately_and_completes(client, monkeypatch):
+    import asyncio
+    import time
+
+    sender = client.app.state.ctx.sender
+    original_home = sender.home
+
+    async def delayed_home(axes=None, progress=None):
+        await asyncio.sleep(0.15)
+        return await original_home(axes, progress=progress)
+
+    monkeypatch.setattr(sender, "home", delayed_home)
+    started_at = time.monotonic()
+    response = client.post("/api/home/start", json={"axes": ["X"]})
+    elapsed = time.monotonic() - started_at
+    assert response.status_code == 200, response.text
+    assert elapsed < 0.12
+    job_id = response.json()["job_id"]
+    assert response.json()["state"] in {"starting", "running"}
+
+    deadline = time.monotonic() + 2.0
+    status = None
+    while time.monotonic() < deadline:
+        status = client.get("/api/home/status", params={"job_id": job_id})
+        assert status.status_code == 200, status.text
+        if status.json()["state"] == "completed":
+            break
+        time.sleep(0.03)
+    assert status is not None
+    assert status.json()["state"] == "completed", status.text
+    assert status.json()["result"]["homed"]["X"] is True

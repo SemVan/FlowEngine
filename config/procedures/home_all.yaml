@@ -1,8 +1,12 @@
 name: home_all
-description: "Home every axis. Safe baseline before any other procedure."
-version: 1
+description: 'DRAFT compatibility wrapper: valves use their single shared-input switches
+  sequentially; syringe axes home separately.'
+version: 2
+draft: true
 steps:
-  - op: home
-    axes: [X, Y, A, B, C]
-  - op: log
-    message: "all axes homed"
+- op: call
+  procedure: home_valves_shared
+- op: call
+  procedure: reference_pumps
+- op: log
+  message: configured axes referenced

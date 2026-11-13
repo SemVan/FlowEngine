@@ -22,7 +22,7 @@
 │   StateMachine     (state.py)                               │
 │   EventBus         (events.py)        ──► WS subscribers    │
 │   GcodeSender      (hardware/sender.py)                     │
-│   MotionModel      (hardware/motion.py, soft limits)        │
+│   MotionModel      (hardware/motion.py, reference state + feedrate validation)        │
 │   HomingStrategy   (hardware/homing/*.py)                   │
 │   Valve, Pump      (hardware/valve.py, pump.py)             │
 └──────────────────────────┬──────────────────────────────────┘
@@ -136,7 +136,7 @@ flowengine/
   hardware/
     queue.py          # CommandQueue
     sender.py         # GcodeSender (jog/move/home/wait_idle/...)
-    motion.py         # MotionModel (soft limits + units)
+    motion.py         # MotionModel (reference state + units)
     homing/           # pluggable strategies
     pressure/         # pluggable sensors
     valve.py, pump.py # domain objects

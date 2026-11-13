@@ -30,7 +30,13 @@ export function connectWs(store) {
 function dispatch(store, msg) {
   switch (msg.type) {
     case "state":
-      store.set({ controllerState: msg.state, controllerDetail: msg.detail || "" });
+      store.set({
+        controllerState: msg.state,
+        controllerDetail: msg.detail || "",
+        ...(msg.homed ? { homed: msg.homed } : {}),
+        ...(msg.reference_counts ? { referenceCounts: msg.reference_counts } : {}),
+        ...(msg.reference_sides ? { referenceSides: msg.reference_sides } : {}),
+      });
       break;
     case "position":
       store.update((s) => ({ ...s, positions: { ...s.positions, ...(msg.positions || {}) }, positionSettled: !!msg.settled }));

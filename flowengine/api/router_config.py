@@ -11,6 +11,7 @@ from flowengine.config import REPO_CONFIG_DIR
 from flowengine.config_store import find_saved, list_saved, load_yaml, save_yaml
 from flowengine.errors import ConfigError
 from flowengine.schemas import ConfigurationProfile, RackConfig
+from flowengine.loaders import load_device_map, load_runtime, load_modes
 
 router = APIRouter(prefix="/api", tags=["config"])
 Context = Annotated[AppContext, Depends(get_ctx)]
@@ -40,6 +41,12 @@ async def get_schemas():
     }
 
 
+@router.get("/config/default-profile")
+async def default_profile():
+    return ConfigurationProfile(name="default", device_map=load_device_map(),
+                                runtime=load_runtime(), modes=load_modes()).model_dump()
+
+
 @router.get("/config/profiles")
 async def profiles():
     return [_summary(path, ConfigurationProfile) for path in list_saved("profiles")]
@@ -55,9 +62,23 @@ async def get_profile(name: str):
 
 @router.put("/config/profiles/{name}")
 async def put_profile(name: str, profile: ConfigurationProfile):
+    if name == "default":
+        raise HTTPException(400, "default is reserved; choose a personal profile name")
     if profile.name != name:
         raise HTTPException(status_code=400, detail="URL name must match profile.name")
     try:
+        # An editor opened before a calibration/procedure result was saved must
+        # not erase the newer evidence when saving hardware settings.
+        try:
+            previous = load_yaml(find_saved("profiles", name), ConfigurationProfile)
+        except ConfigError:
+            previous = None
+        if previous:
+            import json
+            records = {json.dumps(r.model_dump(mode="json"), sort_keys=True): r
+                       for r in [*previous.commissioning, *profile.commissioning]}
+            profile = profile.model_copy(update={"commissioning": sorted(
+                records.values(), key=lambda r: r.timestamp.isoformat())})
         path = save_yaml("profiles", name, profile)
     except ConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -66,7 +87,9 @@ async def put_profile(name: str, profile: ConfigurationProfile):
         "name": name,
         "file": path.name,
         "restart_required": True,
+        "live_apply_url": f"/api/commissioning/profiles/{name}/apply",
         "restart_command": f"python -m flowengine --profile {name}",
+        "file_path": str(path),
     }
 
 

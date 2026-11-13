@@ -1,9 +1,4 @@
-"""Motion model: soft limits + unit conversion + axis lookup.
-
-This layer is the truth about where each axis is allowed to be. Wired-OR
-endstops cannot tell min from max, so hardware never enforces these limits —
-software does, and every motion command goes through here first.
-"""
+"""храним привязку и координаты осей, проверяем скорость; границы X/Y задают микрики"""
 
 from __future__ import annotations
 
@@ -11,7 +6,7 @@ import logging
 import math
 from dataclasses import dataclass
 
-from flowengine.errors import SoftLimitError
+from flowengine.errors import MotionValidationError
 from flowengine.schemas.device import DeviceMap
 
 log = logging.getLogger(__name__)
@@ -24,7 +19,6 @@ class AxisPosition:
 
 
 class MotionModel:
-    """Stateful: tracks last-commanded position (assumed equal to actual after wait_idle)."""
 
     def __init__(self, device_map: DeviceMap, feedrate_cap: float) -> None:
         self._map = device_map
@@ -40,10 +34,16 @@ class MotionModel:
     def homed(self) -> dict[str, bool]:
         return dict(self._homed)
 
+    def mark_referenced(self, axis: str, position: float) -> None:
+        self._map.axis(axis)
+        if not math.isfinite(position):
+            raise MotionValidationError("reference position must be finite")
+        self._homed[axis] = True
+        self._positions[axis] = position
+
     def mark_homed(self, axes: list[str]) -> None:
         for a in axes:
-            self._homed[a] = True
-            self._positions[a] = 0.0
+            self.mark_referenced(a, 0.0)
 
     def invalidate(self, axes: list[str] | None = None) -> None:
         for axis in axes if axes is not None else self._homed:
@@ -73,19 +73,13 @@ class MotionModel:
 
     def _validate(self, axis: str, target: float, feedrate: float | None, cfg) -> AxisPosition:
         if not math.isfinite(target) or (feedrate is not None and not math.isfinite(feedrate)):
-            raise SoftLimitError("position and feedrate must be finite")
+            raise MotionValidationError("position and feedrate must be finite")
         if not self._homed[axis]:
-            raise SoftLimitError(f"axis {axis} not homed; refuse to move")
-        # Convention: home_direction `min` → axis range is [0, travel]; `max` → [-travel, 0].
-        lo, hi = (0.0, cfg.travel) if cfg.home_direction == "min" else (-cfg.travel, 0.0)
-        if target < lo or target > hi:
-            raise SoftLimitError(
-                f"axis {axis} target {target:.3f} outside soft limits [{lo:.3f}, {hi:.3f}]"
-            )
+            raise MotionValidationError(f"axis {axis} is not referenced; home it before normal motion")
         fr = feedrate if feedrate is not None else cfg.feedrate_default
         cap = min(cfg.feedrate_max, self._feedrate_cap)
         if fr <= 0:
-            raise SoftLimitError(f"feedrate must be positive (got {fr})")
+            raise MotionValidationError(f"feedrate must be positive (got {fr})")
         if fr > cap:
             log.warning("feedrate %.1f clamped to cap %.1f on axis %s", fr, cap, axis)
             fr = cap

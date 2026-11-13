@@ -1,0 +1,30 @@
+name: test_sample_positions
+title: Тест крана сэмплера C
+description: КС-ПРОКАЧКА → КС-ЗАБОР → КС-ПРОКАЧКА. Нужен выполненный HOME. В конце
+  мотор C отпускается, привязка теряется. Насосы не включаются.
+version: 1
+draft: false
+parameters: {}
+steps:
+- op: require_reference
+  axes:
+  - C
+- op: set_valve
+  name: sample_valve
+  position: КС-ПРОКАЧКА
+- op: dwell
+  seconds: 2.0
+- op: set_valve
+  name: sample_valve
+  position: КС-ЗАБОР
+- op: dwell
+  seconds: 2.0
+- op: set_valve
+  name: sample_valve
+  position: КС-ПРОКАЧКА
+- op: motors
+  enabled: false
+  axes:
+  - C
+- op: log
+  message: тест C завершён, мотор отпущен; перед следующим движением нужен HOME

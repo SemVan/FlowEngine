@@ -61,3 +61,19 @@ def test_nested_draft_blocks_full_run_but_can_be_previewed():
     with pytest.raises(ValueError, match=r"child.*draft"):
         expand_procedure(parent, lambda _name: child)
     assert len(expand_procedure(parent, lambda _name: child, allow_draft=True).procedure.steps) == 1
+
+
+def test_repeat_expands_nested_procedure_and_preserves_iteration_paths():
+    child = Procedure(name="child", steps=[{"op": "log", "message": "once"}])
+    parent = Procedure(
+        name="parent",
+        parameters={"cycles": {"type": "integer", "default": 3, "minimum": 1}},
+        steps=[{"op": "repeat", "procedure": "child", "times": "${cycles}"}],
+    )
+    expanded = expand_procedure(parent, lambda _name: child)
+    assert [step.op for step in expanded.procedure.steps] == ["log", "log", "log"]
+    assert expanded.step_paths == [
+        "parent step 1 → repeat 1/3 → child step 1",
+        "parent step 1 → repeat 2/3 → child step 1",
+        "parent step 1 → repeat 3/3 → child step 1",
+    ]

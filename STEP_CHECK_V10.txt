@@ -1,0 +1,11 @@
+FlowEngine Personal — Step Check v10
+
+- Added Check Steps X / Y / X+Y on the existing "Тест шагов" page.
+- Uses the same physical endstop seek primitive as Home.
+- Compares precise-latch Marlin Count against the baseline from the last Home.
+- Configurable tolerance in step pulses.
+- OK re-establishes the reference and keeps the original Home baseline.
+- STEP_LOSS invalidates that axis reference and requires a new Home.
+- No coordinate safe range was reintroduced.
+- Result is a return-to-reference error, not encoder proof of rotor step loss.
+- Full test suite: 121 passed.

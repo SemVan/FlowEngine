@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel commissioning-panel">
+  <div class="page-heading">
+    <h2>Результаты наладки</h2>
+    <p>Один лист для визита к установке. Здесь собираются данные и наблюдения; движений эта страница не запускает.</p>
+  </div>
+  <div class="commissioning-plan">
+    <strong>С чего начать на месте</strong>
+    <ol>
+      <li>Открой нужный профиль. Нажми «Прочитать плату» и заполни наблюдения по микрикам.</li>
+      <li>Скопируй первый отчёт в чат. Если Home C ещё не завершён, пока достаточно этого блока.</li>
+      <li>После отдельно запущенной пробы C запиши результат. Остальные разделы заполняются по мере проверки.</li>
+    </ol>
+    <p class="hint">Ранее подтверждено: сэмплер на C, минус к микрику, общий вход кранов z_min. Последняя проба C: seek 120, latch 30, тайм-аут 5 с, до микрика не дошёл. Это история, а не измерения сегодняшнего визита.</p>
+  </div>
+  <div class="constructor-actions">
+    <button id="commission-read" class="primary" type="button">Прочитать плату · без движения</button>
+    <button id="commission-snapshot" type="button">Обновить состояние программы</button>
+    <button id="commission-copy" type="button">Скопировать отчёт для чата</button>
+    <button id="commission-text" type="button">Скачать текст</button>
+    <button id="commission-json" type="button">Скачать JSON со всеми данными</button>
+    <button id="commission-new" type="button">Новый лист</button>
+  </div>
+  <p id="commission-message" role="status" aria-live="polite">Загрузка листа…</p>
+  <p id="commission-context" class="hint"></p>
+  <p class="hint">Чтение платы: только M115, M503, M119, M114 и M211. «Обновить состояние» берёт данные из программы, без команд плате. Заполнение полей не меняет профиль. Пустое поле означает «не измерено».</p>
+  <fieldset>
+    <legend>Ручная проверка микрика — три записи</legend>
+    <p class="hint">Выбери узел. Сначала отпусти микрик и запиши M119, затем удерживай его рукой и запиши, затем отпусти и запиши ещё раз. Другие микрики отпущены. Каждая запись сохраняет время и ответ платы.</p>
+    <div class="step-fields">
+      <label>Проверяемый микрик <select id="commission-switch">
+        <option value="">Без подписи</option><option value="C">C · сэмплер</option>
+        <option value="A">A · промывка</option><option value="B">B · обжимающая жидкость</option>
+        <option value="X">X</option><option value="Y">Y</option><option value="U">U</option>
+      </select></label>
+      <label>Фаза <select id="commission-phase"><option value="">Без подписи</option>
+        <option value="released_before">Отпущен — до нажатия</option>
+        <option value="pressed">Удерживаю рукой</option>
+        <option value="released_after">Снова отпущен</option></select></label>
+      <button id="commission-input-read" type="button">Записать M119 · без движения</button>
+    </div>
+    <pre id="commission-input-view" aria-live="polite">Входы ещё не читались на этом листе.</pre>
+  </fieldset>
+  <form id="commission-form" autocomplete="off">
+    <div id="commission-fields"></div>
+  </form>
+  <details>
+    <summary>Текст отчёта для проверки и ручного копирования</summary>
+    <textarea id="commission-report" class="json-editor compact" readonly aria-label="Текст отчёта"></textarea>
+  </details>
+  <p class="hint">Лист автоматически сохраняется в этом браузере. JSON сохраняет также исходные ответы платы; выгрузи его перед сменой браузера или очисткой данных.</p>
+</section>
+{% endblock %}
+{% block scripts %}
+<script type="module" src="/static/js/commissioning.js"></script>
+{% endblock %}
