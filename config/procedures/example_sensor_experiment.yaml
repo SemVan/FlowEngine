@@ -1,0 +1,21 @@
+name: example_sensor_experiment
+title: "Пример: эксперимент из вложенных циклов"
+description: "Повторяет составную процедуру. По умолчанию 2 цикла по 3 чтения; без движения и нагрева."
+parameters:
+  cycles:
+    type: integer
+    description: Число циклов эксперимента
+    default: 2
+    minimum: 1
+    maximum: 100
+steps:
+  - op: log
+    message: Начало эксперимента с датчиками
+  - op: repeat
+    procedure: example_sensor_cycle
+    times: ${cycles}
+    parameters:
+      readings: 3
+      pause_s: 0.5
+  - op: checkpoint
+    name: Измерения завершены

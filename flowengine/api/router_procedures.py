@@ -36,6 +36,16 @@ def _load_named(name: str) -> Procedure:
     return load_procedure(_find(name))
 
 
+async def _prepare_execution(ctx: AppContext, steps):
+    # A read-only measurement must not restore parking / touch motor settings.
+    if all(s.op in {"read_sensors", "dwell", "log", "checkpoint", "require_reference"} for s in steps):
+        return
+    if ctx.transport.name != "mock" and not ctx.runtime.motion.enabled:
+        raise ValueError("motion interlock is disabled")
+    from flowengine.parking import restore_parking
+    await restore_parking(ctx)
+
+
 @router.get("")
 async def list_all():
     out = []
@@ -54,6 +64,8 @@ async def list_all():
                 "steps": len(proc.steps),
                 "draft": proc.draft,
                 "parameters": list(proc.parameters),
+                "parameter_definitions": {k: v.model_dump() for k, v in proc.parameters.items()},
+                "composite": any(isinstance(s, (CallStep, RepeatStep)) for s in proc.steps),
                 "ok": True,
             }
         )
@@ -127,8 +139,6 @@ async def run_step(
     parameters: RunParameters = None,
 ):
     """Execute one selected step, including from a draft procedure."""
-    if ctx.transport.name != "mock" and not ctx.runtime.motion.enabled:
-        raise HTTPException(status_code=409, detail="motion interlock is disabled")
     try:
         source = _load_named(name)
         resolved = source.resolve(parameters, allow_draft=True)
@@ -145,8 +155,7 @@ async def run_step(
             issues = execution_issues(expanded.procedure, ctx.device_map, ctx.runtime)
             if issues:
                 raise ValueError("; ".join(issues))
-            from flowengine.parking import restore_parking
-            await restore_parking(ctx)
+            await _prepare_execution(ctx, expanded.procedure.steps)
             await ctx.runner.run_selected(
                 name,
                 step_number,
@@ -159,8 +168,7 @@ async def run_step(
             )
             if issues:
                 raise ValueError("; ".join(issues))
-            from flowengine.parking import restore_parking
-            await restore_parking(ctx)
+            await _prepare_execution(ctx, [step])
             await ctx.runner.run_one(name, step_number, step)
     except (FlowEngineError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -178,15 +186,12 @@ async def run(
     ctx: Context,
     parameters: RunParameters = None,
 ):
-    if ctx.transport.name != "mock" and not ctx.runtime.motion.enabled:
-        raise HTTPException(status_code=409, detail="motion interlock is disabled")
     try:
         source = _load_named(name)
         expanded = expand_procedure(source, _load_named, parameters)
         issues = execution_issues(expanded.procedure, ctx.device_map, ctx.runtime)
         if not issues:
-            from flowengine.parking import restore_parking
-            await restore_parking(ctx)
+            await _prepare_execution(ctx, expanded.procedure.steps)
         issues += reference_issues(expanded.procedure, ctx.device_map, ctx.motion.homed)
         if issues:
             raise ValueError("; ".join(issues))

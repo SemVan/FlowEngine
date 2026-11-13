@@ -80,7 +80,7 @@ Additional executable operations (all examples remain drafts until commissioned)
 | `pump` | name, volume_ul, flow_ul_min | Calibrated fluid movement; direction dispense/aspirate |
 | `pump_multi` | pumps: mapping from pump name to volume_ul / flow_ul_min / direction | ≥2 calibrated pumps; matching nominal durations |
 | `motors` | enabled | Optional axes; release invalidates their home |
-| `read_sensors` | — | One M105 report mapped through analog_inputs |
+| `read_sensors` | optional `names`, `require_available`, `samples` (1–1000), `interval_s` (≥0.1) | M105 temperature / raw ADC reports mapped through analog_inputs; each sample is recorded separately |
 | `seek` | axis, channel, by, feedrate | Verified G38.2 contact search; optional zero |
 | `calibrate_valve` | axis, channel, search_distance, feedrate, backoff | Endpoint spans; repeats=3 |
 | `test_reference` | axis, channel, by, feedrate, reference_feedrate, backoff, tolerance_pulses | Return-reference error; repeats=3 |

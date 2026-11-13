@@ -232,7 +232,7 @@ class EndstopInput(BaseModel):
 class AnalogInput(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
     name: str = Field(min_length=1)
-    source: str = Field(pattern=r"^(T\d*|B|C|ADC\d+)$")
+    source: str = Field(pattern=r"^(?:T\d*|B|C|P|L|M|R)(?:\.adc)?$|^ADC\d+$")
     quantity: Literal["temperature", "analog"] = "temperature"
     units: str = "°C"
     scale: float = 1.0

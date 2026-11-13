@@ -43,6 +43,9 @@ pytest
 Without real hardware you can exercise the UI, motion API, procedures, state
 updates, diagnostics, reference-state checks, and physical-endstop calibration against a simulated Marlin controller.
 
+АЦП, монитор датчиков и сборка вложенных циклов из сохранённых процедур:
+[инструкция и примеры](docs/SENSORS_AND_CYCLES.md).
+
 ## Quickstart (real hardware)
 
 1. Connect the Marlin-flashed Monster8 over USB. For USB-C hosts, a USB-A data

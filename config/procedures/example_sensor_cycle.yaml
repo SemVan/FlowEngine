@@ -1,0 +1,22 @@
+name: example_sensor_cycle
+title: "Пример: цикл из атомарной процедуры"
+description: "Повторяет чтение датчиков; не двигает механизмы."
+parameters:
+  readings:
+    type: integer
+    description: Число чтений в одном цикле
+    default: 3
+    minimum: 1
+    maximum: 100
+  pause_s:
+    type: number
+    description: Пауза после каждого чтения, с
+    default: 0.5
+    minimum: 0.01
+    maximum: 60
+steps:
+  - op: repeat
+    procedure: example_sensor_sample
+    times: ${readings}
+    parameters:
+      pause_s: ${pause_s}

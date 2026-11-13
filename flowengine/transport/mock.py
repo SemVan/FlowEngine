@@ -201,7 +201,7 @@ class MockTransport(Transport):
             await self._inbox.put("ok")
             return
         if p.startswith("M105"):
-            await self._inbox.put("ok T:25.0 /0.0 T0:25.0 /0.0 B:24.5 /0.0")
+            await self._inbox.put("ok T:25.0 /0.0 (512.0) T0:25.0 /0.0 (512.0) B:24.5 /0.0 (520.0)")
             return
         if p.startswith("M503"):
             await self._inbox.put("echo: M204 " + " ".join(f"{k}{v:.3f}" for k,v in self._acceleration.items()))

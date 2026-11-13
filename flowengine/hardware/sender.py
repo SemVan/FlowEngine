@@ -13,11 +13,12 @@ import re
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 from flowengine.errors import ControllerError, StateError
-from flowengine.hardware.endstop_seek import seek_switch
 from flowengine.hardware.coordinated import independent_segments, timed_pump_moves
+from flowengine.hardware.endstop_seek import seek_switch
 from flowengine.hardware.group_seek import find_group_edges, move_group_away
 from flowengine.hardware.homing.base import HomingStrategy
 from flowengine.hardware.motion import MotionModel
@@ -512,25 +513,38 @@ class GcodeSender:
             self.invalidate_positions()
         return await self._q.send(command, timeout=self._timeouts.move)
 
-    async def sensors(self) -> dict[str, Any]:
+    async def sensors(self, names: list[str] | None = None, require_available: bool = False) -> dict[str, Any]:
+        from flowengine.hardware.sensors import parse_sensor_report
+
+        selected = [s for s in self._map.analog_inputs if names is None or s.name in names]
+        unknown = set(names or []) - {s.name for s in selected}
+        if unknown:
+            raise ValueError("Unknown configured sensors: " + ", ".join(sorted(unknown)))
+        if require_available and not selected:
+            raise ValueError("Configure analog_inputs before reading required sensors")
         result = await self._q.send("M105", timeout=self._timeouts.diagnostics)
-        found = {
-            k: float(v)
-            for line in result.raw
-            for k, v in re.findall(r"\b(T\d*|B|C|ADC\d+):\s*(-?\d+(?:\.\d+)?)", line)
-        }
+        found = parse_sensor_report(result.raw)
+        readings = []
+        for sensor in selected:
+            raw = found.get(sensor.source)
+            value = raw * sensor.scale + sensor.offset if raw is not None else None
+            available = value is not None and math.isfinite(value)
+            reason = None if available else (
+                "Source absent from M105; check firmware support and source name"
+                if raw is None else "Non-finite calibrated value; check scale and offset"
+            )
+            readings.append({"name": sensor.name, "source": sensor.source,
+                             "units": sensor.units, "quantity": sensor.quantity,
+                             "raw_value": raw, "value": value if available else None,
+                             "available": available, "reason": reason})
+        missing = [r["name"] for r in readings if not r["available"]]
+        if require_available and missing:
+            raise ValueError("Required sensors unavailable: " + ", ".join(missing))
         return {
+            "timestamp": datetime.now(UTC).isoformat(),
             "raw": result.raw,
-            "values": [
-                {
-                    "name": s.name,
-                    "source": s.source,
-                    "units": s.units,
-                    "value": found[s.source] * s.scale + s.offset if s.source in found else None,
-                    "available": s.source in found,
-                }
-                for s in self._map.analog_inputs
-            ],
+            "reported_sources": found,
+            "values": readings,
         }
 
     async def seek(
