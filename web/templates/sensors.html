@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h2>АЦП и датчики Marlin</h2>
+  <p>Только чтение M105: нагреватели и выходы не включаются. Открытие страницы не отправляет команд плате.</p>
+  <p class="hint">Настройка: <a href="/config">Мои профили → Датчики</a>, секция <code>device_map.analog_inputs</code>.
+    T / T0 / B — температура; T.adc / T0.adc / B.adc — сырые отсчёты, если прошивка включает SHOW_TEMP_ADC_VALUES.
+    ADC0 и другие ADCn доступны только при явной поддержке вашей прошивкой. Имена источников берите из ответа ниже.</p>
+  <p class="hint">Преобразование: значение = исходное × множитель + смещение. Отсчёты не являются вольтами без калибровки.
+    Частота — частота запросов, не аппаратная частота АЦП. Во время движения и процедур монитор приостанавливается.
+    Для записи внутри процедуры используйте шаг «Прочитать датчики».</p>
+  <div class="constructor-actions">
+    <button id="sensor-read" type="button">Прочитать один раз</button>
+    <label>Запросов в секунду <input id="sensor-hz" type="number" min="0.1" max="10" step="0.1" value="1"></label>
+    <button id="sensor-start" type="button">Начать опрос</button>
+    <button id="sensor-stop" type="button" disabled>Остановить опрос</button>
+    <button id="sensor-export" type="button">Скачать CSV</button>
+    <button id="sensor-clear" type="button">Очистить историю</button>
+  </div>
+  <p id="sensor-status" role="status" aria-live="polite">Загружаем настройки; опрос выключен.</p>
+  <p id="sensor-count" class="hint">История хранится только в этой вкладке: последние 10 000 строк. Перед закрытием скачайте CSV.</p>
+  <h3>Настроенные каналы</h3>
+  <div style="overflow-x:auto"><table>
+    <thead><tr><th>Датчик</th><th>Источник</th><th>Исходное</th><th>Значение</th><th>Единицы</th><th>Состояние</th></tr></thead>
+    <tbody id="sensor-values"></tbody>
+  </table></div>
+  <h3>Источники, которые реально вернула прошивка</h3>
+  <pre id="sensor-sources">Пока не читали</pre>
+  <details><summary>Последний ответ M105</summary><pre id="sensor-raw"></pre></details>
+  <h3>Последние измерения</h3>
+  <pre id="sensor-history">Нет измерений</pre>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="/static/js/sensors.js?v=1"></script>{% endblock %}

@@ -1,0 +1,15 @@
+name: example_sensor_sample
+title: "Пример: атомарное чтение датчиков"
+description: "Без движения и нагрева. Один M105 и пауза. Недоступные каналы записываются как недоступные."
+parameters:
+  pause_s:
+    type: number
+    description: Пауза после чтения, с
+    default: 0.5
+    minimum: 0.01
+    maximum: 60
+steps:
+  - op: read_sensors
+    title: Прочитать настроенные датчики
+  - op: dwell
+    seconds: ${pause_s}

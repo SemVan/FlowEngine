@@ -2,22 +2,23 @@
 
 from __future__ import annotations
 
-from flowengine.procedures.loader import lint
 from flowengine.hardware.coordinated import timed_pump_moves
+from flowengine.procedures.loader import lint
 from flowengine.schemas import DeviceMap, Procedure, RuntimeParams
 from flowengine.schemas.procedure import (
     HomeStep,
     HomeValveStep,
     MotorsStep,
-    MoveMultiStep,
-    MoveStep,
     MoveForStep,
     MoveMultiForStep,
+    MoveMultiStep,
+    MoveStep,
     PumpMultiStep,
     PumpStep,
+    ReadSensorsStep,
     ReferenceTestStep,
-    RequireSetupStep,
     RequireReferenceStep,
+    RequireSetupStep,
     SeekStep,
     SetParamStep,
     SetValveStep,
@@ -28,11 +29,20 @@ from flowengine.schemas.procedure import (
 
 def execution_issues(procedure: Procedure, device: DeviceMap, runtime: RuntimeParams) -> list[str]:
     issues = lint(procedure, device)
+    if sum(s.samples for s in procedure.steps if isinstance(s, ReadSensorsStep)) > 10_000:
+        issues.append("measurement plan exceeds 10000 sensor reports; split into separate runs")
     known = {a.marlin_axis for a in device.axes}
     for index, step in enumerate(procedure.steps, 1):
         prefix = f"step {index}: "
         if isinstance(step, RequireSetupStep):
             issues.append(prefix + step.message)
+        elif isinstance(step, ReadSensorsStep):
+            names = {s.name for s in device.analog_inputs}
+            unknown = set(step.names or []) - names
+            if unknown:
+                issues.append(prefix + "unknown configured sensors: " + ", ".join(sorted(unknown)))
+            if step.require_available and not names:
+                issues.append(prefix + "configure analog_inputs before reading required sensors")
         elif isinstance(step, (SetParamStep, WaitPressureStep)):
             issues.append(prefix + f"{step.op} is not implemented")
         elif isinstance(step, (HomeValveStep, SetValveStep)):

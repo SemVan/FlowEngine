@@ -16,10 +16,10 @@ from flowengine.schemas import (
     DwellStep,
     HomeStep,
     LogStep,
-    MoveMultiStep,
-    MoveStep,
     MoveForStep,
     MoveMultiForStep,
+    MoveMultiStep,
+    MoveStep,
     Procedure,
     SetParamStep,
     SetValveStep,
@@ -33,8 +33,8 @@ from flowengine.schemas.procedure import (
     PumpStep,
     ReadSensorsStep,
     ReferenceTestStep,
-    RequireSetupStep,
     RequireReferenceStep,
+    RequireSetupStep,
     SeekStep,
     ValveCalibrationStep,
 )
@@ -339,9 +339,14 @@ class ProcedureRunner:
             self._results.append({"step_path": self._step_path, "op": step.op, "result": result})
             await self._state.transition(State.CONNECTED_IDLE, detail="coordinated pumps complete")
         elif isinstance(step, ReadSensorsStep):
-            result = await self._sender.sensors()
-            self._results.append({"step_path": self._step_path, "op": step.op, "result": result})
-            await self._events.publish({"type": "log", "level": "info", "message": str(result)})
+            # Persist each completed sample, including if a later sample fails or is cancelled.
+            for index in range(step.samples):
+                if index:
+                    await asyncio.sleep(step.interval_s)
+                result = await self._sender.sensors(step.names, step.require_available)
+                self._results.append({"step_path": self._step_path, "op": step.op,
+                                      "sample": index + 1, "result": result})
+                await self._events.publish({"type": "log", "level": "info", "message": str(result)})
         elif isinstance(step, SeekStep):
             await self._state.transition(State.HOMING, detail="verified probe search")
             result = await self._sender.seek(

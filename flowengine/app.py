@@ -446,6 +446,12 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             request=request, name="procedures.html", context={"title": "Procedures"}
         )
 
+    @app.get("/sensors", response_class=HTMLResponse)
+    async def sensors_page(request: Request):
+        return templates.TemplateResponse(
+            request=request, name="sensors.html", context={"title": "АЦП и датчики"}
+        )
+
     @app.get("/commissioning", response_class=HTMLResponse)
     async def commissioning_page(request: Request):
         return templates.TemplateResponse(

@@ -29,6 +29,7 @@ def expand_procedure(
     """Resolve and flatten calls/repeats while retaining a readable source path."""
     steps: list[Step] = []
     paths: list[str] = []
+    visits = 0
 
     def visit(
         current: Procedure,
@@ -36,6 +37,10 @@ def expand_procedure(
         stack: tuple[str, ...],
         prefix: tuple[str, ...],
     ) -> None:
+        nonlocal visits
+        visits += 1
+        if visits > max_steps + max_depth:
+            raise ProcedureError(f"procedure expansion exceeds {max_steps + max_depth} calls")
         if current.name in stack:
             cycle = " → ".join((*stack, current.name))
             raise ProcedureError(f"recursive procedure call: {cycle}")

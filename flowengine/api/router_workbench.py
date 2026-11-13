@@ -238,9 +238,11 @@ async def jog(body: MotionRequest, ctx: Context):
 @_wrap_errors
 async def sensors(ctx: Context):
     ctx.state.require(State.CONNECTED_IDLE)
-    if ctx.runner.status["running"]:
-        raise HTTPException(409, "procedure is running")
-    return {"timestamp": datetime.now(UTC).isoformat(), **await ctx.sender.sensors()}
+    if (ctx.runner.status["running"] or ctx.sender.manual_session
+            or ctx.sender.valves.lock.locked() or ctx.queue.depth or ctx.queue.faulted):
+        raise HTTPException(409, "controller is busy; sensor monitor paused")
+    profile, transport = ctx.profile_name, ctx.transport.name
+    return {"profile": profile, "transport": transport, **await ctx.sender.sensors()}
 
 
 @router.post("/calibrate-pump")

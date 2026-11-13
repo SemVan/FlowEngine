@@ -18,9 +18,9 @@ const specs = {
   valves: [["name", "Клапан", "text"], ["axis", "Ось", "text"], ["position_a", "Позиция A", "number"],
     ["position_b", "Позиция B", "number"], ["home_position", "Исходная позиция", "choice:A,B"]],
   endstop_inputs: [["channel", "Marlin channel", "text"], ["axes", "Shared axes (comma separated)", "list"], ["notes", "Wiring / switches", "text"]],
-  analog_inputs: [["name", "Sensor", "text"], ["source", "Firmware source (T0/B/ADC0)", "text"],
-    ["quantity", "temperature / analog", "text"], ["units", "Units", "text"], ["scale", "Scale", "number"],
-    ["offset", "Offset", "number"], ["poll_hz", "Desired Hz (manual read in this version)", "number"], ["notes", "Notes", "text"]],
+  analog_inputs: [["name", "Имя датчика", "text"], ["source", "Источник M105: T, T0, B или T0.adc, B.adc", "text"],
+    ["quantity", "Тип", "choice:temperature,analog"], ["units", "Единицы (°C / отсчёты / В)", "text"], ["scale", "Множитель", "number"],
+    ["offset", "Смещение", "number"], ["poll_hz", "Желаемая частота монитора, Гц (до 10)", "number"], ["notes", "Примечание", "text"]],
 };
 
 function field(value, type) {

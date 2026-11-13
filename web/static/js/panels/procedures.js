@@ -80,10 +80,10 @@ function describeStep(s) {
   if (s.op === "log" || s.op === "require_setup") return s.message;
   if (s.op === "checkpoint") return s.name;
   if (s.op === "require_reference") return `Проверить нули: ${s.axes.join(", ")}`;
-  if (s.op === "repeat") return `${s.procedure} × ${s.times}`;
+  if (s.op === "repeat") return `${s.procedure} × ${s.times}; параметры: ${JSON.stringify(s.parameters || {})}`;
   if (s.op === "call") return `${s.procedure}; параметры: ${JSON.stringify(s.parameters || {})}`;
   if (s.op === "motors") return `${s.enabled ? "Удерживать" : "Отключить удержание, сбросить привязку"}: ${s.axes?.join(", ") || "все оси"}`;
-  if (s.op === "read_sensors") return "Прочитать настроенные датчики один раз";
+  if (s.op === "read_sensors") return `${s.names?.join(", ") || "Все настроенные датчики"}: ${s.samples || 1} измерений${s.samples > 1 ? ", пауза " + s.interval_s + " с" : ""}${s.require_available ? "; отсутствие сигнала — ошибка" : ""}`;
   return JSON.stringify(s);
 }
 
@@ -252,6 +252,57 @@ function field(key, title, value = "", choices = null) {
 }
 
 function help(text) { $("step-fields").append(el("p", text, "hint step-help")); }
+
+function childParameterFields(selected, parameters) {
+  const panel = el("div");
+  panel.id = "child-parameter-fields";
+  panel.className = "step-fields";
+  const json = field("parameters", "Параметры дочерней процедуры (JSON, дополнительно)", JSON.stringify(parameters));
+  const details = el("details");
+  details.append(el("summary", "Параметры в JSON"), json.closest("label"));
+  $("step-fields").append(panel, details);
+  function render(values) {
+    panel.replaceChildren();
+    const child = knownProcedures.find(p => p.name === selected.value);
+    const definitions = child?.parameter_definitions || {};
+    const note = el("p", child ? `${child.title || child.name}: ${child.steps} шагов${child.draft ? ", черновик — для полного запуска сначала подготовьте дочернюю процедуру" : ""}. Пустое поле использует значение по умолчанию дочерней процедуры.` : "Сначала сохраните атомарную процедуру, затем выберите её здесь.", "hint");
+    panel.append(note);
+    for (const [name, definition] of Object.entries(definitions)) {
+      const label = el("label", `${name} · ${definition.description || definition.type}`);
+      const input = el("input");
+      input.dataset.childParameter = name;
+      input.dataset.type = definition.type;
+      input.value = values[name] == null ? "" : String(values[name]);
+      input.placeholder = definition.default == null ? "Обязательный параметр" : `По умолчанию: ${definition.default}`;
+      if (["number", "integer"].includes(definition.type)) input.setAttribute("list", "numeric-parameters");
+      input.addEventListener("input", () => {
+        input.setCustomValidity("");
+        try {
+          const mapped = JSON.parse(json.value || "{}");
+          const text = input.value.trim();
+          if (!text) delete mapped[name];
+          else if (/^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(text)) mapped[name] = text;
+          else if (["number", "integer"].includes(definition.type)) {
+            mapped[name] = number(text);
+            if (definition.type === "integer" && !Number.isInteger(mapped[name])) throw new Error("Нужно целое число");
+            if (definition.minimum != null && mapped[name] < definition.minimum) throw new Error(`Минимум: ${definition.minimum}`);
+            if (definition.maximum != null && mapped[name] > definition.maximum) throw new Error(`Максимум: ${definition.maximum}`);
+          } else if (definition.type === "boolean") {
+            if (!["true", "false"].includes(text)) throw new Error("Введите true или false");
+            mapped[name] = text === "true";
+          } else mapped[name] = input.value;
+          json.value = JSON.stringify(mapped);
+        } catch (error) { input.setCustomValidity(error.message); }
+      });
+      label.append(input); panel.append(label);
+    }
+  }
+  selected.addEventListener("change", () => { json.value = "{}"; render({}); });
+  json.addEventListener("change", () => {
+    try { render(JSON.parse(json.value || "{}")); } catch (error) { show(error.message); }
+  });
+  render(parameters);
+}
 function axisChoices() { return axes().map(a => [a.marlin_axis, `${a.marlin_axis} · ${a.name} (${a.units})`]); }
 function motionAxisChoices() { return axisChoices().filter(([axis]) => !valves().some(v => v.axis === axis)); }
 function axisUnit(axis) { const unit = axes().find(a => a.marlin_axis === axis)?.units || "ед. оси"; return ({mm:"мм", deg:"°"})[unit] || unit; }
@@ -383,10 +434,17 @@ function renderStepFields(s = {}) {
     if (op === "require_setup") help("Этот пункт сохраняет незавершённую часть плана. Запуск будет запрещён, пока вы не замените или не удалите его.");
   } else if (op === "checkpoint") field("name", "Отметка этапа", s.name);
   else if (op === "call" || op === "repeat") {
-    field("procedure", "Процедура", s.procedure, knownProcedures.filter(p => p.ok && p.name !== procedure.name).map(p => [p.name, p.title || p.name]));
-    field("parameters", "Параметры дочерней процедуры (JSON)", JSON.stringify(s.parameters || {}));
+    const selected = field("procedure", "Сохранённая процедура", s.procedure, knownProcedures.filter(p => p.ok && p.name !== procedure.name).map(p => [p.name, `${p.title || p.name} · ${p.composite ? "составная" : "атомарная"}${p.draft ? " · черновик" : ""}`]));
     if (op === "repeat") field("times", "Число повторений", s.times ?? 1);
-  } else if (op === "read_sensors") help("Прочитать настроенные источники и сохранить ответ в результате шага.");
+    childParameterFields(selected, s.parameters || {});
+    help("Можно вкладывать составные процедуры друг в друга. Число повторений: 1–1000 или ${cycles}. Рекурсивные вызовы запрещены; предел — 8 уровней и 10 000 развёрнутых шагов.");
+  } else if (op === "read_sensors") {
+    field("sensor_names", "Имена датчиков через запятую (пусто — все)", s.names?.join(", ") || "");
+    field("samples", "Число измерений, 1–1000", s.samples ?? 1);
+    field("interval_s", "Пауза между ответом и следующим чтением, с (от 0,1)", s.interval_s ?? 1);
+    field("require_available", "Если прошивка не вернула сигнал", String(s.require_available ?? false), [["false", "Записать «недоступен»"], ["true", "Остановить процедуру с ошибкой"]]);
+    help("Только чтение M105, без включения нагревателей. Источники задаются в профиле → Датчики. Серия измерений выполняется последовательно, не параллельно движению.");
+  }
   else if (["seek", "test_reference"].includes(op)) {
     field("axis", "Ось", s.axis, axisChoices());
     field("channel", "Проверенное имя входа", s.channel);
@@ -461,8 +519,22 @@ function buildStep() {
   }
   if (op === "dwell") numeric(["seconds"]);
   if (["log", "require_setup"].includes(op)) { s.message = value("message"); if (!s.message.trim()) throw new Error("Заполните текст шага"); }
-  if (op === "call" || op === "repeat") { s.procedure = value("procedure"); s.parameters = JSON.parse(value("parameters") || "{}"); }
-  if (op === "repeat") numeric(["times"]);
+  if (op === "call" || op === "repeat") {
+    for (const input of $("child-parameter-fields").querySelectorAll("input")) if (!input.reportValidity()) throw new Error(input.validationMessage);
+    s.procedure = value("procedure"); s.parameters = JSON.parse(value("parameters") || "{}");
+    if (!s.procedure) throw new Error("Выберите сохранённую процедуру");
+    if (!s.parameters || typeof s.parameters !== "object" || Array.isArray(s.parameters)) throw new Error("Параметры должны быть объектом");
+  }
+  if (op === "repeat") {
+    numeric(["times"]);
+    if (typeof s.times === "number" && (!Number.isInteger(s.times) || s.times < 1 || s.times > 1000)) throw new Error("Число повторений — целое от 1 до 1000");
+  }
+  if (op === "read_sensors") {
+    numeric(["samples", "interval_s"]);
+    const names = value("sensor_names").split(",").map(n => n.trim()).filter(Boolean);
+    if (names.length) s.names = names;
+    s.require_available = value("require_available") === "true";
+  }
   if (["seek", "test_reference"].includes(op)) {
     s.axis = value("axis"); s.channel = value("channel"); numeric(["by", "feedrate"]);
     if (op === "seek") s.zero = value("zero") === "true";
@@ -485,7 +557,7 @@ async function reload() {
     if (!p.ok) item.textContent = `${p.file}: ${p.error}`;
     else {
       const button = el("button", p.title || p.name); button.type = "button"; button.dataset.open = p.name;
-      item.append(button, el("small", `${p.steps} шагов · ${p.draft ? "черновик" : "сценарий"}`));
+      item.append(button, el("small", `${p.steps} шагов · ${p.composite ? "составная" : "атомарная"} · ${p.draft ? "черновик" : "сценарий"}`));
       if (p.description) button.title = p.description;
     }
     $("proc-list").append(item);
@@ -529,7 +601,11 @@ function previewReport(report) {
     $("proc-feedback").append(el("strong", "Что осталось настроить:"), list);
   } else $("proc-feedback").append(el("p", "Статических ошибок не найдено. Физические позиции проверяются на установке."));
   const sequence = el("ol");
-  for (const step of report.steps) sequence.append(el("li", `${step.title || opNames[step.op] || step.op}: ${describeStep(step)}`));
+  report.steps.forEach((step, index) => {
+    const item = el("li", `${step.title || opNames[step.op] || step.op}: ${describeStep(step)}`);
+    item.append(el("small", report.step_paths?.[index] || "", "hint"));
+    sequence.append(item);
+  });
   $("proc-feedback").append(sequence);
 }
 

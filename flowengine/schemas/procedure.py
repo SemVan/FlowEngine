@@ -1,8 +1,7 @@
 """Procedure DSL — a deliberately small, declarative format.
 
-Procedures are YAML files in `config/procedures/`. No variables, no loops, no
-conditionals beyond `wait_pressure`. If a procedure needs branching, it's two
-procedures. If it needs arithmetic, write a Python script that calls REST.
+Procedures are YAML files with parameters, nested calls and bounded repeats.
+Arbitrary expressions, branching and unbounded loops are not supported.
 """
 
 from __future__ import annotations
@@ -140,6 +139,10 @@ class MotorsStep(_Step):
 
 class ReadSensorsStep(_Step):
     op: Literal["read_sensors"]
+    names: list[str] | None = Field(default=None, min_length=1)
+    require_available: bool = False
+    samples: int = Field(default=1, ge=1, le=1000, strict=True)
+    interval_s: float = Field(default=1.0, ge=0.1, le=3600)
 
 
 class SeekStep(_Step):
